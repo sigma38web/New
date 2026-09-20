@@ -124,8 +124,9 @@ export function resolveProvidersFromEnv(
     return { mode, providers: () => live.providers, routing: live.routing };
   }
   if (mode === 'genspark') {
-    const bridgeUrl = env.YEONJAE_GENSPARK_URL ?? DEFAULT_GENSPARK_BRIDGE_URL;
-    const token = env.YEONJAE_GENSPARK_TOKEN;
+    const rawUrl = env.YEONJAE_GENSPARK_URL ?? DEFAULT_GENSPARK_BRIDGE_URL;
+    const bridgeUrl = rawUrl.trim().replace(/\s+/g, '');
+    const token = env.YEONJAE_GENSPARK_TOKEN ? env.YEONJAE_GENSPARK_TOKEN.trim() : undefined;
     return {
       mode,
       providers: () =>
