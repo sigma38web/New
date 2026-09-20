@@ -124,6 +124,8 @@ export function resolveProvidersFromEnv(
     return { mode, providers: () => live.providers, routing: live.routing };
   }
   if (mode === 'genspark') {
+    const bridgeUrl = env.YEONJAE_GENSPARK_URL ?? DEFAULT_GENSPARK_BRIDGE_URL;
+    const token = env.YEONJAE_GENSPARK_TOKEN;
     return {
       mode,
       providers: () =>
@@ -131,7 +133,12 @@ export function resolveProvidersFromEnv(
           [
             'genspark',
             new GensparkProvider({
-              baseUrl: env.YEONJAE_GENSPARK_URL ?? DEFAULT_GENSPARK_BRIDGE_URL,
+              baseUrl: bridgeUrl,
+              headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+              allowNonLoopback: true,
+              timeoutMs: env.YEONJAE_GENSPARK_TIMEOUT_MS
+                ? parseInt(env.YEONJAE_GENSPARK_TIMEOUT_MS, 10)
+                : 1_800_000,
             }),
           ],
         ]),

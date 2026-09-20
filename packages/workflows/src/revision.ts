@@ -12,7 +12,7 @@ import {
   type ManuscriptVersionRow,
 } from '@yeonjae/db';
 import { type Generated, validatorFor } from '@yeonjae/domain';
-import { checkOutputLanguage, codePointLength, sliceCodePoints, toNfcText } from '@yeonjae/prose';
+import { checkOutputLanguage, codePointLength, segmentParagraphs, sliceCodePoints, toNfcText } from '@yeonjae/prose';
 import { contentHashOf } from './drafting.js';
 import { type Issue } from './evaluation.js';
 import { WorkflowError } from './errors.js';
@@ -84,14 +84,27 @@ export async function reviseVersion(
         );
       const nfc = toNfcText(input.version.text);
       const total = codePointLength(nfc.text);
+      const paragraphs = segmentParagraphs(nfc);
+      const pMap = new Map(paragraphs.map((p) => [p.id, p]));
       // Span = union of the targeted issues' spans; issues without a span widen to the whole text.
       let start = total;
       let end = 0;
       for (const i of targeted) {
         const s = i.chapter_span;
-        if (s?.start !== undefined && s.end !== undefined) {
-          start = Math.min(start, s.start);
-          end = Math.max(end, s.end);
+        let sStart = s?.start;
+        let sEnd = s?.end;
+        if ((sStart === undefined || sEnd === undefined) && s?.paragraph_ids && s.paragraph_ids.length > 0) {
+          for (const pid of s.paragraph_ids) {
+            const p = pMap.get(pid);
+            if (p) {
+              sStart = sStart === undefined ? p.start : Math.min(sStart, p.start);
+              sEnd = sEnd === undefined ? p.end : Math.max(sEnd, p.end);
+            }
+          }
+        }
+        if (sStart !== undefined && sEnd !== undefined && sStart < sEnd) {
+          start = Math.min(start, sStart);
+          end = Math.max(end, sEnd);
         } else {
           start = 0;
           end = total;
@@ -136,12 +149,87 @@ export async function reviseVersion(
         },
         block: compileFor(ctx, 'editor_full'),
       });
+      const rawOutput = (call.output ?? {}) as Record<string, any>;
+      const normalizedNewText =
+        typeof rawOutput.new_text === 'string' && rawOutput.new_text.length > 0
+          ? rawOutput.new_text
+          : typeof rawOutput.revised_text === 'string' && rawOutput.revised_text.length > 0
+            ? rawOutput.revised_text
+            : typeof rawOutput.revised_span === 'string' && rawOutput.revised_span.length > 0
+              ? rawOutput.revised_span
+              : typeof rawOutput.text === 'string' && rawOutput.text.length > 0
+                ? rawOutput.text
+                : typeof rawOutput.prose === 'string' && rawOutput.prose.length > 0
+                  ? rawOutput.prose
+                  : typeof rawOutput.revision === 'string' && rawOutput.revision.length > 0
+                    ? rawOutput.revision
+                    : typeof rawOutput.replacement === 'string' && rawOutput.replacement.length > 0
+                      ? rawOutput.replacement
+                      : '';
+
+      if (!normalizedNewText || normalizedNewText.trim().length === 0) {
+        throw new WorkflowError(
+          'PATCH_UNANCHORED',
+          `targeted_reviser returned no revised text for dimension ${input.dimension}`,
+          { step: 'revise', recommendedActions: ['regenerate'] },
+        );
+      }
+
+      const validScopes = ['sentence', 'paragraph', 'dialogue', 'scene', 'seam'] as const;
+      const scope = validScopes.includes(rawOutput.scope) ? rawOutput.scope : 'scene';
+
+      let patchStart = start;
+      let patchEnd = end;
+      if (
+        rawOutput.span &&
+        typeof rawOutput.span.start === 'number' &&
+        typeof rawOutput.span.end === 'number' &&
+        rawOutput.span.start >= 0 &&
+        rawOutput.span.end <= total &&
+        rawOutput.span.start < rawOutput.span.end
+      ) {
+        patchStart = rawOutput.span.start;
+        patchEnd = rawOutput.span.end;
+      }
+
+      const candidateOriginal = sliceCodePoints(nfc, patchStart, patchEnd);
+      const span: Patch['span'] = { start: patchStart, end: patchEnd };
+      if (
+        typeof rawOutput.span?.original_quote === 'string' &&
+        toNfcText(rawOutput.span.original_quote).text === candidateOriginal
+      ) {
+        span.original_quote = candidateOriginal;
+      }
+      if (Array.isArray(rawOutput.span?.paragraph_ids)) {
+        span.paragraph_ids = rawOutput.span.paragraph_ids.filter((p: unknown) => typeof p === 'string');
+      }
+
+      const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const preserved = new Set<string>();
+      if (Array.isArray(rawOutput.preserved_facts_ack)) {
+        for (const p of rawOutput.preserved_facts_ack) {
+          if (typeof p === 'string' && UUID_RE.test(p)) preserved.add(p);
+        }
+      }
+      for (const m of mustPreserve) {
+        if (UUID_RE.test(m)) preserved.add(m);
+      }
+
+      const changedClaims = Array.isArray(rawOutput.changed_claims)
+        ? rawOutput.changed_claims.map((c: unknown) => String(c))
+        : [];
+
       const candidate: Patch = {
-        ...(call.output as Patch),
         id: patchId(ctx, input.version.id, input.round),
         from_version_id: input.version.id,
+        scope,
+        span,
+        new_text: toNfcText(normalizedNewText).text,
+        changed_claims: changedClaims,
+        preserved_facts_ack: [...preserved],
         issue_ids: targeted.map((i) => i.id),
         reviser_call_id: call.llmCallId,
+        dimension: input.dimension,
       };
       const v = validatorFor<Patch>('patch.schema.json')(candidate);
       if (!v.ok)

@@ -32,5 +32,5 @@
   "regression_cases": [
     "continuity_checker.fixture.smoke"
   ],
-  "content_hash": "sha256:09c85c2f21888e101e209fffba57da144146215cb4d63eb205415dae693623ef"
+  "content_hash": "sha256:e4a7f4e6bcec74ca3512641c170dfab3b34cad3873d682d84f2e851465e48b0d"
 }

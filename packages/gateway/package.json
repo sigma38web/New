@@ -18,8 +18,9 @@
   },
   "dependencies": {
     "@yeonjae/domain": "workspace:*",
-    "@yeonjae/prose": "workspace:*",
     "@yeonjae/narrative": "workspace:*",
-    "@yeonjae/prompts": "workspace:*"
+    "@yeonjae/prompts": "workspace:*",
+    "@yeonjae/prose": "workspace:*",
+    "undici": "^8.10.2"
   }
 }

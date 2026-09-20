@@ -35,7 +35,7 @@ import { type Gateway } from '@yeonjae/gateway';
 import { produceChapter } from './chapter-production.js';
 import { WorkflowError } from './errors.js';
 import { ensureProjectIdentity } from './identity-from-intake.js';
-import { validateIntake, type StoryIntake, type StorySpec } from './planning.js';
+import { interpretRequirements, validateIntake, type StoryIntake, type StorySpec } from './planning.js';
 import {
   buildFullBible,
   loadStoredPlan,
@@ -76,22 +76,44 @@ export async function startNovel(
 ): Promise<StartNovelResult> {
   const intake = validateIntake(input.intake);
   const project = await getProject(deps.pool, input.projectId);
+  const existingRun = await getNovelRun(deps.pool, project.id);
+
+  if (
+    existingRun &&
+    (existingRun.approved_concept_id !== null ||
+      ['planning', 'producing', 'completed'].includes(existingRun.status))
+  ) {
+    throw new WorkflowError(
+      'SELECTION_REQUEST_CHANGED',
+      `this novel is already ${existingRun.status}`,
+      {
+        step: 'start',
+        data: { status: existingRun.status },
+      },
+    );
+  }
+
+  // If a run already exists, increment spec_version so new intake, spec, and concepts never collide with prior artifacts
+  const targetSpecVersion = existingRun ? existingRun.spec_version + 1 : 1;
+
   const { artifact } = await putArtifact(deps.pool, {
     workspaceId: project.workspace_id,
     projectId: project.id,
     step: 'intake',
     kind: 'story_intake',
-    key: 'v1',
+    key: `v${targetSpecVersion}`,
     schema: 'story-intake.schema.json',
     payload: intake,
   });
-  const { run } = await ensureNovelRun(deps.pool, {
-    workspaceId: project.workspace_id,
-    projectId: project.id,
-    intakeArtifactId: artifact.id,
-    targetChapters: intake.target_chapters,
-    createdByUserId: input.createdByUserId,
-  });
+  const { run } = existingRun
+    ? { run: existingRun }
+    : await ensureNovelRun(deps.pool, {
+        workspaceId: project.workspace_id,
+        projectId: project.id,
+        intakeArtifactId: artifact.id,
+        targetChapters: intake.target_chapters,
+        createdByUserId: input.createdByUserId,
+      });
   // A project without a pinned Narrative Identity gets one composed from the intake (ADR-0027 layers:
   // the two contracts are always the global profiles; genre/setting/naming/terminology come from intake).
   await ensureProjectIdentity(deps.pool, {
@@ -100,24 +122,30 @@ export async function startNovel(
     intake,
     store: deps.profiles,
   });
-  const retryingPreApproval = run.status === 'failed' && run.approved_concept_id === null;
-  if (!['intake', 'suggesting', 'awaiting_approval'].includes(run.status) && !retryingPreApproval)
-    throw new WorkflowError('SELECTION_REQUEST_CHANGED', `this novel is already ${run.status}`, {
-      step: 'start',
-      data: { status: run.status },
-    });
   await transitionNovelRun(deps.pool, {
     runId: run.id,
     to: 'suggesting',
-    expectFrom: retryingPreApproval ? ['failed'] : ['intake'],
-    patch: retryingPreApproval ? { lastError: null } : undefined,
+    expectFrom: ['intake', 'failed', 'cancelled', 'awaiting_approval', 'suggesting'],
+    patch: {
+      specVersion: targetSpecVersion,
+      intakeArtifactId: artifact.id,
+      targetChapters: intake.target_chapters,
+      lastError: null,
+    },
   });
+  await deps.pool.query(
+    `UPDATE jobs SET control = 'run', control_requested_at = NULL, control_requested_by = NULL,
+            status = CASE WHEN status IN ('cancelled', 'failed', 'paused') THEN 'queued' ELSE status END,
+            cancelled_at = NULL, paused_at = NULL, error = NULL, updated_at = now()
+     WHERE project_id = $1 AND kind = 'story_plan'`,
+    [project.id],
+  );
   const { ctx } = await makePlanContext(deps, project.id);
   let round;
   try {
     round = await suggestConcepts(ctx, {
       intake,
-      specVersion: run.spec_version,
+      specVersion: targetSpecVersion,
       count: input.conceptCount,
     });
   } catch (err) {
@@ -127,29 +155,26 @@ export async function startNovel(
   // Concepts are also operator resources (0010) so the existing review screen and select route see them.
   const existing = await listConceptCandidates(deps.pool, {
     projectId: project.id,
-    round: run.spec_version,
+    round: targetSpecVersion,
     limit: 50,
   });
   if (existing.length === 0)
     await insertConceptCandidates(deps.pool, {
       workspaceId: project.workspace_id,
       projectId: project.id,
-      round: run.spec_version,
+      round: targetSpecVersion,
       candidates: round.concepts.map((c, i) => ({
         label: `${i + 1}. ${c.logline.slice(0, 70)}`,
         payload: c as unknown as Record<string, unknown>,
       })),
       derivedFromArtifactId: round.artifactId,
     });
-  const already = run.status === 'awaiting_approval';
-  const after = already
-    ? { run: (await getNovelRun(deps.pool, project.id)) ?? run }
-    : await transitionNovelRun(deps.pool, {
-        runId: run.id,
-        to: 'awaiting_approval',
-        expectFrom: ['suggesting'],
-        event: { kind: 'run.suggestions_ready', payload: { concepts: round.concepts.length } },
-      });
+  const after = await transitionNovelRun(deps.pool, {
+    runId: run.id,
+    to: 'awaiting_approval',
+    expectFrom: ['suggesting'],
+    event: { kind: 'run.suggestions_ready', payload: { concepts: round.concepts.length } },
+  });
   return { run: after.run, specVersion: round.specVersion, concepts: round.concepts };
 }
 
@@ -556,7 +581,13 @@ async function planNovel(deps: NovelDeps, run: NovelRunRow, isCancelled?: () => 
     isCancelled ? { isDurablyCancelled: isCancelled } : undefined,
   );
   await updateJob(deps.pool, ctx.job.id, { status: 'running', currentStep: 'plan' });
-  const spec = await loadArtifactByKey(ctx, 'story_spec', 'story_spec', `v${run.spec_version}`);
+  let spec: { payload: unknown; artifactId: string };
+  try {
+    spec = await loadArtifactByKey(ctx, 'story_spec', 'story_spec', `v${run.spec_version}`);
+  } catch {
+    const interpreted = await interpretRequirements(ctx, intake, run.spec_version);
+    spec = { payload: interpreted.spec, artifactId: interpreted.artifactId };
+  }
   const concept = await loadConcept(ctx, run.spec_version, run.approved_concept_id);
   const planned = await buildFullBible(ctx, {
     intake,

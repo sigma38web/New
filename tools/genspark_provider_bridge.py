@@ -75,7 +75,12 @@ def _extract_json(text: str) -> Optional[Any]:
         candidates.append(raw[first_brace:last_brace + 1])
     for c in candidates:
         try:
-            return json.loads(c)
+            return json.loads(c, strict=False)
+        except Exception:
+            pass
+        try:
+            cleaned = re.sub(r",\s*([\]}])", r"\1", c)
+            return json.loads(cleaned, strict=False)
         except Exception:
             pass
     return None
@@ -90,11 +95,14 @@ class GensparkBridgeHandler(BaseHTTPRequestHandler):
 
     def _send_json(self, status: int, data: Any) -> None:
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            logger.warning("Client disconnected before response could be sent")
 
     def do_GET(self) -> None:
         path = self.path.split("?")[0]
@@ -123,7 +131,20 @@ class GensparkBridgeHandler(BaseHTTPRequestHandler):
 
         self._send_json(404, {"error": "not_found", "path": path})
 
+    def _check_auth(self) -> bool:
+        expected = os.getenv("GENSPARK_BRIDGE_TOKEN")
+        if not expected:
+            return True
+        auth_header = self.headers.get("Authorization", "")
+        if auth_header == f"Bearer {expected}":
+            return True
+        self._send_json(401, {"error": "unauthorized", "message": "Missing or invalid Bearer token"})
+        return False
+
     def do_POST(self) -> None:
+        if not self._check_auth():
+            return
+
         path = self.path.split("?")[0]
         length = int(self.headers.get("Content-Length", 0))
         raw_body = self.rfile.read(length).decode("utf-8", errors="replace")
@@ -178,11 +199,13 @@ class GensparkBridgeHandler(BaseHTTPRequestHandler):
 
         started = time.time()
         try:
+            bridge_timeout = int(os.getenv("GENSPARK_TIMEOUT", "1800"))
             result = genspark_auth.send_chat_completion(
                 messages=messages,
                 model=model_id,
                 temperature=temperature,
                 max_tokens=max_tokens,
+                timeout=bridge_timeout,
                 stream=True,
                 log_stream=False,
             )
@@ -221,9 +244,7 @@ class GensparkBridgeHandler(BaseHTTPRequestHandler):
         input_tokens = int(usage_data.get("prompt_tokens") or max(1, len(system + user) // 4))
         output_tokens = int(usage_data.get("completion_tokens") or max(1, len(text) // 4))
 
-        parsed_json = None
-        if json_mode or params.get("json_schema_mode"):
-            parsed_json = _extract_json(text)
+        parsed_json = _extract_json(text)
 
         elapsed = time.time() - started
         logger.info(

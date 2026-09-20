@@ -6,3 +6,5 @@
 
 [CHAPTER TEXT]
 {{chapter_text}}
+
+Respond with the JSON object only. No markdown fences, no commentary.

@@ -29,5 +29,5 @@
   "regression_cases": [
     "factual_summarizer.fixture.smoke"
   ],
-  "content_hash": "sha256:36eb259a427d73086d2d7582041954cfaa2919d5fea3bdf85900f55f6d7bd9cd"
+  "content_hash": "sha256:ab701e05ef150a41492ac17909a69e58f8741b8c40d93a2e1eadb39c867708fb"
 }

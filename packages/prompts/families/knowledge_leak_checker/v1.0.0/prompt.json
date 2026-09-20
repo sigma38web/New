@@ -30,5 +30,5 @@
   "regression_cases": [
     "knowledge_leak_checker.fixture.smoke"
   ],
-  "content_hash": "sha256:8948f9f67014a496ee69ac3fc4b6d432990f6505836678fcbf47db27520d23e0"
+  "content_hash": "sha256:13dfad43b35e058d64fca851ee90694d8c8e6269adc864004fa86712103e55cb"
 }

@@ -4,10 +4,10 @@
 [LOCKED FACTS]
 {{locked_facts}}
 
-[CANON STATE — participants, as of the chapter's start]
+[CANON STATE — participants, as of this chapter's start]
 {{canon_state}}
 
-[RECENT EVENTS]
+[RECENT EVENTS — last 3-5 chapters]
 {{recent_events}}
 
 [WORLD AND POWER RULES]

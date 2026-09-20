@@ -279,6 +279,9 @@ importers:
       '@yeonjae/prose':
         specifier: workspace:*
         version: link:../prose
+      undici:
+        specifier: ^8.10.2
+        version: 8.10.2
 
   packages/narrative:
     dependencies:
@@ -2742,6 +2745,10 @@ packages:
   undici@7.29.1:
     resolution: {integrity: sha512-RYONW2MeafgYlkVOKYKkA/Ag7BmXqgIWCa8t1m0JcxrQg9pI9lEqRhAOruOBCbAohOa/gkCF+iPi9hrgvTzu6Q==}
     engines: {node: '>=20.18.1'}
+
+  undici@8.10.2:
+    resolution: {integrity: sha512-/y4/bH9YNU5hi9NIrpOuvGXFcxrj3CMrV+/AYpowAYTpHn8gX/XPFjNy766FPoYY0miQhdW977JFWKGNhBdwyQ==}
+    engines: {node: '>=22.19.0'}
 
   unionfs@4.6.0:
     resolution: {integrity: sha512-fJAy3gTHjFi5S3TP5EGdjs/OUMFFvI/ady3T8qVuZfkv8Qi8prV/Q8BuFEgODJslhZTT2z2qdD2lGdee9qjEnA==}
@@ -5288,6 +5295,8 @@ snapshots:
   undici-types@7.24.6: {}
 
   undici@7.29.1: {}
+
+  undici@8.10.2: {}
 
   unionfs@4.6.0:
     dependencies:

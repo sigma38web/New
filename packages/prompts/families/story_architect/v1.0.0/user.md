@@ -1,10 +1,11 @@
-Target chapters: {{target_chapters}}
-
 [STORY SPEC]
 {{story_spec}}
 
 [SELECTED CONCEPT]
 {{concept}}
 
-[BIBLE SUMMARY]
+[FULL STORY BIBLE — PLANNED; preserve every field]
 {{bible_summary}}
+
+[TARGET CHAPTERS — exact coverage required]
+{{target_chapters}}

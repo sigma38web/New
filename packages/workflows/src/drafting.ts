@@ -204,16 +204,45 @@ export async function planScenes(
         pack: packCallInput(input.pack),
         block: compileFor(ctx, 'planner_compact'),
       });
-      const raw = Array.isArray(call.output.scenes) ? call.output.scenes : undefined;
-      if (!raw)
+      let rawList = Array.isArray(call.output.scenes) ? [...call.output.scenes] : undefined;
+      if (!rawList)
         throw new WorkflowError('SCENE_PLAN_INVALID', 'scene planner returned no scenes array', {
           step: 'scene_plan',
           recommendedActions: ['regenerate'],
         });
+      if (rawList.length > input.contract.scene_count) {
+        rawList = rawList.slice(0, input.contract.scene_count);
+      } else if (rawList.length < input.contract.scene_count) {
+        while (rawList.length < input.contract.scene_count) {
+          const last = rawList[rawList.length - 1] ?? {};
+          rawList.push({
+            ...last,
+            scene_no: rawList.length + 1,
+            objective: `Continuation of scene ${rawList.length}`,
+          });
+        }
+      }
+      const normalizedRaw = rawList.map((s, i) =>
+        normalizeScenePlan(s, i, input.contract, rawList!.length),
+      );
+      const totalPlanned = normalizedRaw.reduce((sum, s) => sum + s.length_target.value, 0);
+      const targetVal = input.contract.length_target.value;
+      if (totalPlanned > 0 && totalPlanned !== targetVal) {
+        let running = 0;
+        normalizedRaw.forEach((s, idx) => {
+          if (idx === normalizedRaw.length - 1) {
+            s.length_target.value = targetVal - running;
+          } else {
+            const share = Math.round((s.length_target.value / totalPlanned) * targetVal);
+            s.length_target.value = share;
+            running += share;
+          }
+        });
+      }
       const validate = validatorFor<ScenePlan>('scene-plan.schema.json');
       const scenes: ScenePlan[] = [];
       const issues: string[] = [];
-      raw.forEach((s, i) => {
+      normalizedRaw.forEach((s, i) => {
         const v = validate(s);
         if (!v.ok)
           issues.push(
@@ -260,6 +289,208 @@ export async function planScenes(
     },
     String(ch),
   );
+}
+
+export function normalizeScenePlan(
+  raw: any,
+  index: number,
+  contract: ChapterContract,
+  totalScenes: number,
+): ScenePlan {
+  const s = raw ?? {};
+  const sceneNo = index + 1;
+
+  // 1. Objective
+  const objective =
+    typeof s.objective === 'string' && s.objective.trim()
+      ? s.objective.trim()
+      : `Scene ${sceneNo} objective`;
+
+  // 2. POV
+  let povId = contract.pov.character_id;
+  if (s.pov) {
+    const povStr =
+      typeof s.pov === 'string'
+        ? s.pov
+        : (s.pov.character_id || s.pov.character || s.pov.name);
+    if (typeof povStr === 'string') {
+      const match = contract.participants.find(
+        (p) => p.character_id.toLowerCase() === povStr.toLowerCase(),
+      );
+      if (match) povId = match.character_id;
+    }
+  }
+  const pov: ScenePlan['pov'] = {
+    character_id: povId,
+    person: contract.pov.person || 'third_limited',
+  };
+
+  // 3. Participants
+  const participantIds = new Set<string>();
+  participantIds.add(pov.character_id);
+
+  if (Array.isArray(s.participants)) {
+    for (const p of s.participants) {
+      const pid = typeof p === 'string' ? p : (p?.character_id || p?.id || p?.name);
+      if (typeof pid === 'string') {
+        const match = contract.participants.find(
+          (cp) => cp.character_id.toLowerCase() === pid.toLowerCase(),
+        );
+        if (match) participantIds.add(match.character_id);
+      }
+    }
+  }
+  if (participantIds.size === 1 && contract.participants.length > 1) {
+    const second = contract.participants.find((p) => p.character_id !== pov.character_id);
+    if (second) participantIds.add(second.character_id);
+  }
+  const participants = Array.from(participantIds);
+
+  // 4. Location
+  let locationId = contract.locations[0]!;
+  if (s.location_id && contract.locations.includes(s.location_id)) {
+    locationId = s.location_id;
+  }
+
+  // 5. Beats
+  const validBeatTypes = new Set([
+    'action',
+    'dialogue',
+    'revelation',
+    'decision',
+    'emotional',
+    'comedic',
+    'progression',
+    'transition',
+    'status_text',
+    'cliffhanger',
+  ]);
+  let beats: ScenePlan['beats'] = [] as unknown as ScenePlan['beats'];
+  if (Array.isArray(s.beats)) {
+    beats = s.beats.map((b: any) => {
+      if (typeof b === 'string') {
+        const match = /^\[([A-Z_]+)\]\s*(.*)$/.exec(b.trim());
+        let type = 'action';
+        let desc = b.trim();
+        if (match && match[1]) {
+          const tag = match[1].toLowerCase();
+          if (validBeatTypes.has(tag)) type = tag;
+          else if (tag === 'reaction') type = 'emotional';
+          else if (tag === 'escalation') type = 'action';
+          else if (tag === 'payoff') type = 'progression';
+          else if (tag === 'reversal') type = 'decision';
+          else if (tag === 'setup') type = 'transition';
+          else if (tag === 'dialogue_clash') type = 'dialogue';
+          else if (tag === 'internal') type = 'emotional';
+          desc = match[2] || desc;
+        }
+        return {
+          type: type as any,
+          description: desc,
+        };
+      }
+      return {
+        type: validBeatTypes.has(b?.type) ? b.type : 'action',
+        description: b?.description ? String(b.description) : String(b),
+      };
+    });
+  }
+  if (beats.length === 0) {
+    beats = [
+      {
+        type: 'action',
+        description: objective,
+      },
+    ];
+  }
+
+  // 6. Length Target
+  let wordVal = Math.round(contract.length_target.value / Math.max(1, totalScenes));
+  if (typeof s.length_target_words === 'number' && s.length_target_words > 50) {
+    wordVal = s.length_target_words;
+  } else if (s.length_target && typeof s.length_target.value === 'number') {
+    wordVal = s.length_target.value;
+  }
+  const length_target = {
+    unit: 'words' as const,
+    value: wordVal,
+  };
+
+  // 7. Speaker Pairs
+  let speaker_pairs: ScenePlan['speaker_pairs'] = [];
+  if (Array.isArray(s.speaker_pairs)) {
+    for (const pair of s.speaker_pairs) {
+      if (!pair || typeof pair !== 'object') continue;
+      let spId: string | undefined;
+      let addrId: string | undefined;
+
+      if (
+        pair.speaker_id &&
+        contract.participants.some((p) => p.character_id === pair.speaker_id)
+      ) {
+        spId = pair.speaker_id;
+      }
+      if (
+        pair.addressee_id &&
+        contract.participants.some((p) => p.character_id === pair.addressee_id)
+      ) {
+        addrId = pair.addressee_id;
+      }
+      if (!spId && typeof pair.from === 'string') {
+        const match = contract.participants.find(
+          (p) => p.character_id.toLowerCase() === pair.from.toLowerCase(),
+        );
+        if (match) spId = match.character_id;
+      }
+      if (!addrId && typeof pair.to === 'string') {
+        const match = contract.participants.find(
+          (p) => p.character_id.toLowerCase() === pair.to.toLowerCase(),
+        );
+        if (match) addrId = match.character_id;
+      }
+
+      if (spId && addrId && spId !== addrId) {
+        speaker_pairs.push({
+          speaker_id: spId,
+          addressee_id: addrId,
+          register: pair.register ?? {
+            formality: 2,
+            deference: 1,
+            familiarity: 1,
+            directness: 3,
+            contractions: 'neutral',
+            address_terms: [],
+          },
+        });
+      }
+    }
+  }
+  if (speaker_pairs.length === 0 && participants.length >= 2) {
+    speaker_pairs.push({
+      speaker_id: participants[0]!,
+      addressee_id: participants[1]!,
+      register: {
+        formality: 2,
+        deference: 1,
+        familiarity: 1,
+        directness: 3,
+        contractions: 'neutral',
+        address_terms: [],
+      },
+    });
+  }
+
+  const out: ScenePlan = {
+    scene_no: sceneNo,
+    objective,
+    pov,
+    participants: participants as unknown as [string, ...string[]],
+    location_id: locationId,
+    beats,
+    length_target,
+    speaker_pairs,
+  };
+  return out;
 }
 
 export interface SceneDraftRef {

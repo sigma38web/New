@@ -12,7 +12,7 @@ import { HttpProvider, type HttpProviderOptions } from './http-provider.js';
 import { type Provider, type ProviderRequest, type ProviderResponse } from './types.js';
 
 export const DEFAULT_GENSPARK_BRIDGE_URL = 'http://127.0.0.1:8091';
-export const DEFAULT_GENSPARK_TIMEOUT_MS = 180_000;
+export const DEFAULT_GENSPARK_TIMEOUT_MS = 1_800_000;
 
 export interface GensparkProviderOptions {
   readonly name?: string | undefined;

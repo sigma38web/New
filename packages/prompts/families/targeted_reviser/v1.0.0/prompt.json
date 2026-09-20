@@ -21,7 +21,7 @@
   "output_mode": "json",
   "params": {
     "temperature": 0.5,
-    "max_tokens": 3000,
+    "max_tokens": 8192,
     "top_p": 1
   },
   "failure_behavior": {
@@ -34,5 +34,5 @@
   "regression_cases": [
     "targeted_reviser.fixture.smoke"
   ],
-  "content_hash": "sha256:ad073c06d4e37569551bfadd11690211da8d0809f28f5a674d21fbdf3865d8e2"
+  "content_hash": "sha256:9b28af8f0d39667842c5dd7af311743cf8328065e3d0c88273bd39726933b8b0"
 }

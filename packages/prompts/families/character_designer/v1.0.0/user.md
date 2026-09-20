@@ -4,5 +4,5 @@
 [SELECTED CONCEPT]
 {{concept}}
 
-[CAST BRIEF]
+[CAST BRIEF — preserve every supplied name]
 {{cast_brief}}

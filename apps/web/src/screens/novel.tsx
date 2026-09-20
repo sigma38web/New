@@ -92,25 +92,126 @@ interface FullBibleResponse {
 }
 
 export const GENRES = [
-  'hunter-gate',
   'system-progression',
+  'hunter-gate',
   'regression',
-  'modern-fantasy',
-  'murim',
-  'romance-fantasy',
-  'villainess',
-  'academy',
+  'transmigration',
   'possession',
   'reincarnation',
+  'academy',
+  'extra-survival',
+  'slow-burn-romance',
+  'contract-marriage',
+  'enemies-to-lovers',
+  'harem',
+  'pure-love',
+  'romance-fantasy',
+  'villainess',
+  'modern-fantasy',
+  'murim',
+  'constellation-streamer',
+  'tower-climbing',
   'dungeon',
   'apocalypse-survival',
   'management',
+  'crafting-production',
+  'necromancy-undead',
   'idol-entertainment',
   'game-world',
-  'comedy',
+  'misunderstanding-comedy',
+  'dark-fantasy-revenge',
+  'healing-slice-of-life',
+  'overpowered-munchkin',
   'character-drama',
-  'slow-burn-romance',
+  'comedy',
+  'chaebol-business',
+  'sports-athletics',
+  'cooking-culinary',
+  'medical-doctor',
+  'childcare-family',
+  'regret-obsession',
+  'revenge-court',
+  'beast-taming',
+  'hidden-master',
+  'cliche-subversion',
+  'space-scifi',
+  'historical-alternate',
+  'law-prosecutor',
+  'military-war',
+  'streaming-creator',
+  'alchemy-potion',
+  'virtual-reality',
+  'demon-realm',
+  'hero-antihero',
+  'reverse-harem',
+  'second-generation',
+  'stealth-assassin',
+  'priest-paladin',
+  'genius-prodigy',
+  'isekai-truck',
+  'other',
 ] as const;
+
+export const GENRE_LABELS: Record<(typeof GENRES)[number], string> = {
+  'system-progression': 'System / Status Window Progression (상태창/시스템물)',
+  'hunter-gate': 'Hunter / Gate / Raid (헌터물)',
+  'regression': 'Regression / Second Chance Returner (회귀물)',
+  'transmigration': 'Transmigration / Book Isekai (빙의물)',
+  'possession': 'Soul Possession / Body Snatcher (영혼 빙의)',
+  'reincarnation': 'Reincarnation / Past Life (환생물)',
+  'academy': 'Hunter / Magic Academy (아카데미물)',
+  'extra-survival': 'Extra / Mob Surviving Original Canon (원작 엑스트라물)',
+  'slow-burn-romance': 'Slow-Burn Romance / Mutual Yearning (순애/슬로우번)',
+  'contract-marriage': 'Contract Marriage / Fake Relationship (계약결혼/선결혼후연애)',
+  'enemies-to-lovers': 'Enemies to Lovers / Rivals (혐관/라이벌)',
+  'harem': 'Dynamic Entourage / Harem (하렘)',
+  'pure-love': 'Pure Monogamous Devotion (일편단심 순애)',
+  'romance-fantasy': 'Romance Fantasy / RoFan (로맨스 판타지/로판)',
+  'villainess': 'Villainess / Noble Lady Reversal (악녀물)',
+  'modern-fantasy': 'Modern Urban Fantasy (현대 판타지)',
+  'murim': 'Murim / Martial Arts (무협/신무협)',
+  'constellation-streamer': 'Constellations / Cosmic Streaming (성좌물/인방물)',
+  'tower-climbing': 'Tower Climbing / Trials (시험의 탑/탑등반)',
+  'dungeon': 'Dungeon / Labyrinth Crawler (던전물)',
+  'apocalypse-survival': 'Apocalypse / Cataclysm Survival (아포칼립스/생존물)',
+  'management': 'Territory / Guild Management (영지물/경영물)',
+  'crafting-production': 'Crafting / Blacksmith / Production (생산직/대장장이)',
+  'necromancy-undead': 'Necromancer / Undead Army (네크로맨서)',
+  'idol-entertainment': 'Idol / Actor / Broadcaster (연예계/아이돌/배우)',
+  'game-world': 'Game World / VRMMO (가상현실/게임빙의)',
+  'misunderstanding-comedy': 'Misunderstanding / Overestimated Genius (착각물)',
+  'dark-fantasy-revenge': 'Dark Fantasy / Revenge / Trauma (피폐/복수물)',
+  'healing-slice-of-life': 'Healing / Cozy Fantasy / Slice of Life (힐링물)',
+  'overpowered-munchkin': 'Overpowered Munchkin / Unrivaled Prodigy (먼치킨)',
+  'character-drama': 'Character Drama / Ensemble Cast (군상극)',
+  'comedy': 'Comedy / Satire (개그물)',
+  'chaebol-business': 'Chaebol / Corporate Tycoon / Stock Finance (재벌물/경영물)',
+  'sports-athletics': 'Sports / Athletics Genius / Football & Baseball (스포츠물/천재물)',
+  'cooking-culinary': 'Gourmet / Cooking & Tavern Fantasy (요리물/미식판타지)',
+  'medical-doctor': 'Genius Doctor / Modern & Fantasy Surgeon (의사/메디컬물)',
+  'childcare-family': 'Childcare / Raising the Young Monster Lord (육아물/가족물)',
+  'regret-obsession': 'Regret & Desperate Obsession (후회물/집착물)',
+  'revenge-court': 'Imperial Court Intrigue & Noble Revenge (궁중암투/복수극)',
+  'beast-taming': 'Monster Tamer / Spirit Summoner (테이머/소환물)',
+  'hidden-master': 'Hidden Master / Disguised High Ranker (은둔고수/정체숨김)',
+  'cliche-subversion': 'Cliche Subversion / Meta Trope Satire (클리셰 비틀기)',
+  'space-scifi': 'Sci-Fi / Space Opera / Mecha (SF/스페이스오페라/메카)',
+  'historical-alternate': 'Alternate History / Joseon & Imperial Rebirth (대체역사물)',
+  'law-prosecutor': 'Legal Drama / Genius Prosecutor & Judge (법정/검사물)',
+  'military-war': 'Military Warfare / Mercenary Commander (군부/전쟁물)',
+  'streaming-creator': 'Dimensional Broadcasting / Streaming Hunter (인터넷방송/차원스트리머)',
+  'alchemy-potion': 'Alchemist / Potion Merchant & Pharmacist (연금술/물약상)',
+  'virtual-reality': 'Virtual Reality Game / Hidden Class Ranker (VR게임/히든클래스)',
+  'demon-realm': 'Demon King / Lord of Darkness (마왕물/마계물)',
+  'hero-antihero': 'Corrupt Hero / Dark Anti-Hero (타락용사/다크히어로)',
+  'reverse-harem': 'Reverse Harem / Multiple Suitors (역하렘물)',
+  'second-generation': '2nd Generation Hunter / Legacy Inheritor (헌터 2세물)',
+  'stealth-assassin': 'Shadow Assassin / Covert Operative (암살자/그림자공작)',
+  'priest-paladin': 'Heretic Inquisitor / Holy Paladin (성기사/이단심문관)',
+  'genius-prodigy': 'Overwhelming Young Prodigy (천재 유망주/환골탈태)',
+  'isekai-truck': 'Rebirth by Vehicle / Dimensional Drift (차원이동/이세계환생)',
+  'other': 'Other / Custom Subgenre (기타)',
+};
 
 export function runTone(status: string): StatusTone {
   if (status === 'failed' || status === 'cancelled') return 'bad';
@@ -147,10 +248,12 @@ const lines = (value: string): string[] =>
     .filter(Boolean);
 
 export function NovelScreen({ projectId }: { projectId: string }): ReactNode {
-  const { api } = useAppState();
+  const { api, workspaceId } = useAppState();
+  const [editingIntake, setEditingIntake] = useState(false);
   const status = useResource<NovelStatus>(
     () => api.get(`/v1/projects/${projectId}/novel`),
-    [projectId],
+    [projectId, workspaceId],
+    { enabled: Boolean(workspaceId && projectId) },
   );
   // A transient poll failure must not turn an already loaded run back into the intake form.
   const notStarted = !status.data && status.problem?.problem.code === 'NOT_FOUND';
@@ -169,16 +272,28 @@ export function NovelScreen({ projectId }: { projectId: string }): ReactNode {
     };
   }, [active, status.reload]);
 
+  const showIntake =
+    notStarted ||
+    (!status.loading && !status.data && !status.error) ||
+    editingIntake ||
+    status.data?.run.status === 'cancelled';
+
   return (
     <section aria-labelledby="novel-heading">
       <h1 id="novel-heading">New novel</h1>
-      {notStarted || (!status.loading && !status.data && !status.error) ? (
+      {showIntake ? (
         <IntakeForm
           key={projectId}
           projectId={projectId}
           onStarted={() => {
+            setEditingIntake(false);
             status.reload();
           }}
+          onCancel={
+            status.data && status.data.run.status !== 'cancelled'
+              ? () => setEditingIntake(false)
+              : undefined
+          }
         />
       ) : (
         <AsyncRegion
@@ -198,6 +313,7 @@ export function NovelScreen({ projectId }: { projectId: string }): ReactNode {
               onChanged={() => {
                 status.reload();
               }}
+              onEditIntake={() => setEditingIntake(true)}
             />
           ) : null}
         </AsyncRegion>
@@ -209,9 +325,11 @@ export function NovelScreen({ projectId }: { projectId: string }): ReactNode {
 export function IntakeForm({
   projectId,
   onStarted,
+  onCancel,
 }: {
   projectId: string;
   onStarted: () => void;
+  onCancel?: (() => void) | undefined;
 }): ReactNode {
   const { api, can } = useAppState();
   const start = useMutation();
@@ -221,21 +339,29 @@ export function IntakeForm({
   const [premise, setPremise] = useState('');
   const [genre, setGenre] = useState<string>('hunter-gate');
   const [secondary, setSecondary] = useState('');
+  const [secondary2, setSecondary2] = useState('');
   const [mainName, setMainName] = useState('');
+  const [mainRole, setMainRole] = useState('');
   const [mainDescription, setMainDescription] = useState('');
   const [supporting, setSupporting] = useState('');
   const [world, setWorld] = useState('');
+  const [settingType, setSettingType] = useState<
+    'modern_korea' | 'secondary_world' | 'murim_historical' | 'other'
+  >('secondary_world');
   const [tropes, setTropes] = useState('');
   const [forbidden, setForbidden] = useState('');
   const [mandatory, setMandatory] = useState('');
   const [restrictions, setRestrictions] = useState('');
   const [progression, setProgression] = useState('');
-  const [romance, setRomance] = useState<'none' | 'subplot' | 'main'>('none');
+  const [romance, setRomance] = useState<'none' | 'subplot' | 'main'>('subplot');
+  const [romancePace, setRomancePace] = useState<'slow_burn' | 'medium' | 'fast'>('slow_burn');
+  const [romanceDynamic, setRomanceDynamic] = useState('');
   const [ending, setEnding] = useState<'happy' | 'bittersweet' | 'open' | 'tragic' | 'unspecified'>(
-    'unspecified',
+    'happy',
   );
   const [rating, setRating] = useState<'all' | '12' | '15' | '19'>('15');
   const [pace, setPace] = useState<'fast' | 'medium' | 'slow'>('fast');
+  const [ciderLevel, setCiderLevel] = useState<'high_cider' | 'balanced' | 'struggle'>('balanced');
   const [chapters, setChapters] = useState('30');
   const [words, setWords] = useState('2500');
   const [tone, setTone] = useState('');
@@ -246,17 +372,29 @@ export function IntakeForm({
 
   const submit = () => {
     start.run(async () => {
+      const secondaryGenres = [secondary, secondary2].filter(Boolean);
+      const romanceConstraints = romanceDynamic.trim() ? [romanceDynamic.trim()] : [];
+      const toneKeywords = [
+        ...lines(tone),
+        ciderLevel === 'high_cider'
+          ? 'high cider / fast payoff (사이다)'
+          : ciderLevel === 'balanced'
+            ? 'balanced catharsis'
+            : 'gritty struggle',
+      ];
+
       const intake: Record<string, unknown> = {
         title_working: title.trim(),
         premise: premise.trim(),
         genre: {
           primary: genre,
-          ...(secondary ? { secondary: [secondary] } : {}),
+          ...(secondaryGenres.length ? { secondary: secondaryGenres } : {}),
         },
-        ...(mainName.trim()
+        ...(mainName.trim() || mainRole.trim() || mainDescription.trim()
           ? {
               main_character: {
-                name: mainName.trim(),
+                name: mainName.trim() || 'Protagonist',
+                ...(mainRole.trim() ? { role: mainRole.trim() } : {}),
                 ...(mainDescription.trim() ? { description: mainDescription.trim() } : {}),
               },
             }
@@ -272,7 +410,15 @@ export function IntakeForm({
               }),
             }
           : {}),
-        ...(world.trim() ? { world_concept: world.trim() } : {}),
+        ...(world.trim() || settingType
+          ? {
+              ...(world.trim() ? { world_concept: world.trim() } : {}),
+              setting_preferences: {
+                setting_type: settingType,
+                ...(world.trim() ? { notes: world.trim() } : {}),
+              },
+            }
+          : {}),
         ...(lines(tropes).length ? { desired_tropes: lines(tropes) } : {}),
         ...(lines(forbidden).length ? { forbidden_developments: lines(forbidden) } : {}),
         ...(lines(mandatory).length
@@ -280,10 +426,14 @@ export function IntakeForm({
           : {}),
         ...(lines(restrictions).length ? { content_restrictions: lines(restrictions) } : {}),
         ...(progression.trim() ? { progression_system: progression.trim() } : {}),
-        romance: { presence: romance },
+        romance: {
+          presence: romance,
+          ...(romance !== 'none' ? { pace: romancePace } : {}),
+          ...(romanceConstraints.length ? { constraints: romanceConstraints } : {}),
+        },
         ending_preference: ending,
         target_audience: { rating },
-        tone: { pace, ...(lines(tone).length ? { keywords: lines(tone) } : {}) },
+        tone: { pace, ...(toneKeywords.length ? { keywords: toneKeywords } : {}) },
         target_chapters: Number(chapters),
         target_words_per_chapter: Number(words),
         operating_mode: 'autopilot',
@@ -362,13 +512,13 @@ export function IntakeForm({
             >
               {GENRES.map((g) => (
                 <option key={g} value={g}>
-                  {g}
+                  {GENRE_LABELS[g] ?? g}
                 </option>
               ))}
             </select>
           )}
         </Field>
-        <Field path="novel-secondary" label="Secondary genre (optional)">
+        <Field path="novel-secondary" label="Secondary genre 1 (optional)">
           {(p) => (
             <select
               {...p}
@@ -380,7 +530,25 @@ export function IntakeForm({
               <option value="">none</option>
               {GENRES.filter((g) => g !== genre).map((g) => (
                 <option key={g} value={g}>
-                  {g}
+                  {GENRE_LABELS[g] ?? g}
+                </option>
+              ))}
+            </select>
+          )}
+        </Field>
+        <Field path="novel-secondary2" label="Secondary genre 2 (optional)">
+          {(p) => (
+            <select
+              {...p}
+              value={secondary2}
+              onChange={(e) => {
+                setSecondary2(e.target.value);
+              }}
+            >
+              <option value="">none</option>
+              {GENRES.filter((g) => g !== genre && g !== secondary).map((g) => (
+                <option key={g} value={g}>
+                  {GENRE_LABELS[g] ?? g}
                 </option>
               ))}
             </select>
@@ -427,6 +595,21 @@ export function IntakeForm({
             />
           )}
         </Field>
+        <Field
+          path="novel-main-role"
+          label="Main character role / archetype (optional)"
+          hint="e.g. Disregarded Extra, Hidden Regressor, Transmigrated Reader, Academy Underdog, Calculative Strategist"
+        >
+          {(p) => (
+            <input
+              {...p}
+              value={mainRole}
+              onChange={(e) => {
+                setMainRole(e.target.value);
+              }}
+            />
+          )}
+        </Field>
         <Field path="novel-main-desc" label="Main character notes (optional)">
           {(p) => (
             <textarea
@@ -455,7 +638,23 @@ export function IntakeForm({
             />
           )}
         </Field>
-        <Field path="novel-world" label="World concept (optional)">
+        <Field path="novel-setting-type" label="Setting world type">
+          {(p) => (
+            <select
+              {...p}
+              value={settingType}
+              onChange={(e) => {
+                setSettingType(e.target.value as typeof settingType);
+              }}
+            >
+              <option value="secondary_world">Fantasy Secondary World / Magic Realm (이세계/정통판타지)</option>
+              <option value="modern_korea">Modern Korea / Neo-Seoul (현대물/헌터)</option>
+              <option value="murim_historical">Murim / Historical Martial Realm (무협/동양풍)</option>
+              <option value="other">Other / Multi-realm / Dimensional (기타)</option>
+            </select>
+          )}
+        </Field>
+        <Field path="novel-world" label="World concept notes (optional)">
           {(p) => (
             <textarea
               {...p}
@@ -572,8 +771,67 @@ export function IntakeForm({
               }}
             >
               <option value="none">none</option>
-              <option value="subplot">subplot</option>
+              <option value="subplot">subplot (recommended for webnovels)</option>
               <option value="main">main plot</option>
+            </select>
+          )}
+        </Field>
+        {romance !== 'none' ? (
+          <>
+            <Field path="novel-romance-pace" label="Romance pace">
+              {(p) => (
+                <select
+                  {...p}
+                  value={romancePace}
+                  onChange={(e) => {
+                    setRomancePace(e.target.value as typeof romancePace);
+                  }}
+                >
+                  <option value="slow_burn">
+                    Slow Burn (Deliberate build-up, emotional tension, slow realization)
+                  </option>
+                  <option value="medium">
+                    Medium (Steady romantic progression alongside main plot)
+                  </option>
+                  <option value="fast">Fast (Early mutual attraction & partnership)</option>
+                </select>
+              )}
+            </Field>
+            <Field
+              path="novel-romance-dynamic"
+              label="Romance dynamic / constraints (optional)"
+              hint="e.g. Strict single love interest (no harem), Enemies to reluctant allies, Contract bond, Reluctant savior"
+            >
+              {(p) => (
+                <input
+                  {...p}
+                  value={romanceDynamic}
+                  onChange={(e) => {
+                    setRomanceDynamic(e.target.value);
+                  }}
+                />
+              )}
+            </Field>
+          </>
+        ) : null}
+        <Field path="novel-cider" label="Catharsis & tension balance (사이다 / 고구마)">
+          {(p) => (
+            <select
+              {...p}
+              value={ciderLevel}
+              onChange={(e) => {
+                setCiderLevel(e.target.value as typeof ciderLevel);
+              }}
+            >
+              <option value="high_cider">
+                High Cider (사이다) — Fast decisive payoffs, zero prolonged passive suffering
+              </option>
+              <option value="balanced">
+                Balanced Catharsis — Deepening stakes & challenges with earned satisfying releases
+              </option>
+              <option value="struggle">
+                Gritty Struggle — High stakes, hard-earned underdog victories against overwhelming odds
+              </option>
             </select>
           )}
         </Field>
@@ -586,11 +844,11 @@ export function IntakeForm({
                 setEnding(e.target.value as typeof ending);
               }}
             >
-              <option value="unspecified">let the studio decide</option>
-              <option value="happy">happy</option>
+              <option value="happy">happy (recommended for Korean webnovels)</option>
               <option value="bittersweet">bittersweet</option>
               <option value="open">open</option>
               <option value="tragic">tragic</option>
+              <option value="unspecified">let the studio decide</option>
             </select>
           )}
         </Field>
@@ -610,9 +868,16 @@ export function IntakeForm({
             </select>
           )}
         </Field>
-        <button type="submit" disabled={start.busy}>
-          {start.busy ? 'Thinking of story directions…' : 'Get story suggestions'}
-        </button>
+        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+          <button type="submit" disabled={start.busy}>
+            {start.busy ? 'Thinking of story directions…' : 'Get story suggestions'}
+          </button>
+          {onCancel ? (
+            <button type="button" onClick={onCancel} disabled={start.busy}>
+              Cancel
+            </button>
+          ) : null}
+        </div>
       </Form>
     </section>
   );
@@ -622,10 +887,12 @@ function RunPanel({
   projectId,
   data,
   onChanged,
+  onEditIntake,
 }: {
   projectId: string;
   data: NovelStatus;
   onChanged: () => void;
+  onEditIntake?: (() => void) | undefined;
 }): ReactNode {
   const { api, can } = useAppState();
   const act = useMutation();
@@ -981,6 +1248,18 @@ function RunPanel({
               }}
             >
               Resume from the last checkpoint
+            </button>
+          ) : null}
+          {(run.status === 'awaiting_approval' ||
+            run.status === 'failed' ||
+            run.status === 'cancelled') &&
+          onEditIntake ? (
+            <button
+              type="button"
+              disabled={act.busy}
+              onClick={onEditIntake}
+            >
+              Modify intake & get fresh suggestions
             </button>
           ) : null}
           {can('owner') && !['completed', 'cancelled'].includes(run.status) ? (

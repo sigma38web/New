@@ -377,16 +377,30 @@ export class ArtifactLlmOutputStore implements LlmOutputStore {
     output: { text?: string | undefined; json?: unknown },
     record: GatewayAuditLike,
   ) {
-    const { artifact } = await putArtifact(this.pool, {
-      workspaceId: this.scope.workspaceId,
-      projectId: this.scope.projectId,
-      jobId: this.scope.jobId,
-      step: `llm:${record.role}`,
-      kind: 'llm_output',
-      key,
-      payload: { text: output.text, json: output.json },
-    });
-    return { artifactRef: { artifact_id: artifact.id, content_hash: artifact.content_hash } };
+    try {
+      const { artifact } = await putArtifact(this.pool, {
+        workspaceId: this.scope.workspaceId,
+        projectId: this.scope.projectId,
+        jobId: this.scope.jobId,
+        step: `llm:${record.role}`,
+        kind: 'llm_output',
+        key,
+        payload: { text: output.text, json: output.json },
+      });
+      return { artifactRef: { artifact_id: artifact.id, content_hash: artifact.content_hash } };
+    } catch (err: unknown) {
+      if (err instanceof Error && err.message.startsWith('ARTIFACT_NONDETERMINISTIC')) {
+        const r = await this.pool.query<{ id: string; content_hash: string }>(
+          `SELECT id, content_hash FROM workflow_artifacts WHERE project_id = $1 AND kind = 'llm_output' AND key = $2`,
+          [this.scope.projectId, key],
+        );
+        const prior = r.rows[0];
+        if (prior) {
+          return { artifactRef: { artifact_id: prior.id, content_hash: prior.content_hash } };
+        }
+      }
+      throw err;
+    }
   }
 }
 

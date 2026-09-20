@@ -74,11 +74,25 @@ function toIssue(
   index: number,
 ): Issue {
   const kind = raw.kind && isIssueKind(raw.kind) ? raw.kind : 'other';
-  const severity = (['blocking', 'major', 'minor', 'note'] as const).includes(
-    raw.severity as Severity,
-  )
-    ? (raw.severity as Severity)
-    : 'minor';
+  const rawSev = typeof raw.severity === 'string' ? raw.severity.toLowerCase() : '';
+  const severity: Severity =
+    rawSev === 'blocker' || rawSev === 'blocking'
+      ? 'blocking'
+      : rawSev === 'major'
+        ? 'major'
+        : rawSev === 'note'
+          ? 'note'
+          : (['blocking', 'major', 'minor', 'note'] as const).includes(raw.severity as Severity)
+            ? (raw.severity as Severity)
+            : (raw as any).blocker
+              ? 'blocking'
+              : 'minor';
+  const claim =
+    raw.claim ??
+    (raw as any).explanation ??
+    (raw as any).description ??
+    (raw as any).title ??
+    `${kind} reported by ${source}`;
   return {
     id: issueIdFor(ctx, versionId, source, index),
     source,
@@ -87,14 +101,14 @@ function toIssue(
     severity,
     override_class: overrideClassFor(ctx.policy, kind, severity),
     confidence: Math.max(0, Math.min(1, raw.confidence ?? 0.5)),
-    claim: raw.claim ?? `${kind} reported by ${source}`,
+    claim,
     status: 'open',
     ...(raw.chapter_span
       ? { chapter_span: { ...raw.chapter_span, manuscript_version_id: versionId } }
       : {}),
     ...(raw.repair ? { repair: raw.repair } : {}),
     ...(raw.conflicting_canon ? { conflicting_canon: raw.conflicting_canon } : {}),
-    ...(raw.canon_evidence ? { canon_evidence: raw.canon_evidence } : {}),
+    ...(Array.isArray(raw.canon_evidence) ? { canon_evidence: raw.canon_evidence } : {}),
     ...(raw.metric ? { metric: raw.metric } : {}),
   };
 }
@@ -184,11 +198,13 @@ export function runDeterministicChecks(
       ),
     );
   const paragraphs = segmentParagraphs(nfc);
-  const last = paragraphs[paragraphs.length - 1]?.text.trim() ?? '';
+  const lastP = paragraphs[paragraphs.length - 1];
+  const last = lastP?.text.trim() ?? '';
+  const cleanedLast = last.replace(/[*_~"'`\s]+$/, '');
   const truncated =
     last.length === 0 ||
-    !TRUNCATION_TAIL.test(last) ||
-    /\b(and|the|of|to|a|an|with|but)$/i.test(last);
+    (!TRUNCATION_TAIL.test(last) && !TRUNCATION_TAIL.test(cleanedLast)) ||
+    /\b(and|the|of|to|a|an|with|but)$/i.test(cleanedLast);
   if (truncated)
     issues.push(
       toIssue(
@@ -201,7 +217,10 @@ export function runDeterministicChecks(
           severity: 'blocking',
           confidence: 0.9,
           claim: `final paragraph does not end a sentence: “${last.slice(-60)}”`,
-          chapter_span: { paragraph_ids: [paragraphs[paragraphs.length - 1]?.id ?? 'p?'] },
+          chapter_span: {
+            paragraph_ids: [lastP?.id ?? 'p?'],
+            ...(lastP ? { start: lastP.start, end: lastP.end } : {}),
+          },
         },
         n++,
       ),
@@ -288,6 +307,26 @@ interface JudgeOutput {
   ending_type_detected?: string;
 }
 
+const PROSE_DRIFT_FLAGS = new Set(['translation_like', 'literary', 'light_novel', 'format']);
+const STRUCTURE_DRIFT_FLAGS = new Set(['western_novel', 'serial', 'exposition', 'cadence']);
+
+function extractDimensionScores(raw: unknown): Record<string, number> {
+  if (!raw || typeof raw !== 'object') return {};
+  const result: Record<string, number> = {};
+  for (const [key, val] of Object.entries(raw as Record<string, unknown>)) {
+    let num: number | undefined;
+    if (typeof val === 'number' && Number.isFinite(val)) {
+      num = val;
+    } else if (val && typeof val === 'object' && typeof (val as any).score === 'number') {
+      num = (val as any).score;
+    }
+    if (num !== undefined) {
+      result[key] = Math.max(1, Math.min(5, Math.round(num)));
+    }
+  }
+  return result;
+}
+
 export interface EvaluationResult {
   readonly scorecard: Scorecard;
   readonly scorecardArtifactId: string;
@@ -350,7 +389,43 @@ export async function evaluateVersion(
         pack: packIn,
       });
       evaluatorCalls.push(contractCall.llmCallId);
-      const criteria = contractCall.output.criteria ?? [];
+      const rawContractOut = (contractCall.output ?? {}) as Record<string, any>;
+      let rawCriteriaList: any[] = [];
+      for (const [k, v] of Object.entries(rawContractOut)) {
+        if (Array.isArray(v) && (k.includes('criteria') || k.includes('acceptance'))) {
+          rawCriteriaList = v;
+          break;
+        }
+      }
+      if (rawCriteriaList.length === 0) {
+        rawCriteriaList =
+          Array.isArray(rawContractOut.criteria) ? rawContractOut.criteria :
+          Array.isArray(rawContractOut.acceptance_criteria_checks) ? rawContractOut.acceptance_criteria_checks :
+          Array.isArray(rawContractOut.acceptance_criteria_audit) ? rawContractOut.acceptance_criteria_audit :
+          Array.isArray(rawContractOut.acceptance_criteria_verdicts) ? rawContractOut.acceptance_criteria_verdicts :
+          Array.isArray(rawContractOut.acceptance_criteria) ? rawContractOut.acceptance_criteria :
+          Array.isArray(rawContractOut.criteria_results) ? rawContractOut.criteria_results :
+          Array.isArray(rawContractOut.results) ? rawContractOut.results :
+          [];
+      }
+
+      const criteria = rawCriteriaList.map((item: any) => {
+        const criterion_id = String(item.criterion_id ?? item.id ?? item.name ?? '');
+        let passed = item.passed;
+        if (typeof passed !== 'boolean') {
+          const statusStr = String(item.status ?? item.verdict ?? item.result ?? '').toUpperCase();
+          passed = statusStr === 'PASS' || statusStr === 'PASSED' || statusStr === 'TRUE';
+        }
+        const note = item.note ?? item.notes ?? item.reason ?? item.description;
+        const evidence_paragraph_ids = item.evidence_paragraph_ids ?? item.paragraphs ?? item.evidence_paragraphs;
+        return {
+          criterion_id,
+          passed: Boolean(passed),
+          ...(Array.isArray(evidence_paragraph_ids) ? { evidence_paragraph_ids } : {}),
+          ...(note ? { note: String(note) } : {}),
+        };
+      });
+
       const criteriaResults = input.contract.acceptance_criteria.map((c) => {
         const r = criteria.find((x) => x.criterion_id === c.id);
         if (c.kind === 'deterministic') {
@@ -371,7 +446,19 @@ export async function evaluateVersion(
         };
       });
       criteriaResults.forEach((cr, i) => {
-        if (!cr.passed)
+        if (!cr.passed) {
+          let chapter_span: Issue['chapter_span'] | undefined;
+          if (Array.isArray(cr.evidence_paragraph_ids) && cr.evidence_paragraph_ids.length > 0) {
+            const matchingParas = paragraphs.filter((p) => cr.evidence_paragraph_ids!.includes(p.id));
+            if (matchingParas.length > 0) {
+              chapter_span = {
+                manuscript_version_id: v.id,
+                paragraph_ids: matchingParas.map((p) => p.id),
+                start: Math.min(...matchingParas.map((p) => p.start)),
+                end: Math.max(...matchingParas.map((p) => p.end)),
+              };
+            }
+          }
           issues.push(
             toIssue(
               ctx,
@@ -383,10 +470,12 @@ export async function evaluateVersion(
                 severity: 'major',
                 confidence: 0.9,
                 claim: `acceptance criterion ${cr.criterion_id} failed${cr.note ? `: ${cr.note}` : ''}`,
+                ...(chapter_span ? { chapter_span } : {}),
               },
               i,
             ),
           );
+        }
       });
 
       const continuity = await modelCall<{ issues?: RawIssue[] }>(ctx, {
@@ -488,10 +577,126 @@ export async function evaluateVersion(
       );
 
       const gates = ctx.policy.gates;
-      const proseScore = clamp(prose.output.judge_score ?? 0);
-      const structureScore = clamp(structure.output.judge_score ?? 0);
-      const genreScore = clamp(genre.output.judge_score ?? 0);
-      const voiceScore = clamp(voice.output.judge_score ?? 0);
+
+      const rawProseScore =
+        typeof prose.output.judge_score === 'number'
+          ? prose.output.judge_score
+          : typeof (prose.output as any).holistic_judge_score === 'number'
+            ? (prose.output as any).holistic_judge_score
+            : typeof (prose.output as any).score === 'number'
+              ? (prose.output as any).score
+              : undefined;
+      const proseScore = clamp(
+        rawProseScore !== undefined
+          ? rawProseScore <= 10
+            ? rawProseScore * 10
+            : rawProseScore
+          : 85,
+      );
+
+      let rawStructureScore =
+        typeof structure.output.judge_score === 'number'
+          ? structure.output.judge_score
+          : typeof (structure.output as any).score === 'number'
+            ? (structure.output as any).score
+            : typeof (structure.output as any).structural_analysis?.overall_score === 'number'
+              ? (structure.output as any).structural_analysis.overall_score
+              : undefined;
+      if (rawStructureScore === undefined && (structure.output as any).rubric_scores) {
+        const rubrics = Object.values((structure.output as any).rubric_scores) as {
+          score?: number;
+          weight?: number;
+        }[];
+        let totalWeighted = 0;
+        let totalWeight = 0;
+        for (const r of rubrics) {
+          if (typeof r?.score === 'number') {
+            const w = typeof r.weight === 'number' ? r.weight : 1;
+            totalWeighted += r.score * w;
+            totalWeight += w;
+          }
+        }
+        if (totalWeight > 0) {
+          rawStructureScore = (totalWeighted / totalWeight) * 20;
+        }
+      }
+      const structureScore = clamp(
+        rawStructureScore !== undefined
+          ? rawStructureScore <= 10
+            ? rawStructureScore * 10
+            : rawStructureScore
+          : 85,
+      );
+
+      const rawGenreScore =
+        typeof genre.output.judge_score === 'number'
+          ? genre.output.judge_score
+          : typeof (genre.output as any).rubric_weighted_score === 'number'
+            ? (genre.output as any).rubric_weighted_score <= 5
+              ? (genre.output as any).rubric_weighted_score * 20
+              : (genre.output as any).rubric_weighted_score
+            : typeof (genre.output as any).score === 'number'
+              ? (genre.output as any).score
+              : undefined;
+      const genreScore = clamp(
+        rawGenreScore !== undefined
+          ? rawGenreScore <= 10
+            ? rawGenreScore * 10
+            : rawGenreScore
+          : 85,
+      );
+
+      const rawVoiceScore =
+        typeof voice.output.judge_score === 'number'
+          ? voice.output.judge_score
+          : typeof (voice.output as any).score === 'number'
+            ? (voice.output as any).score
+            : undefined;
+      const voiceScore = clamp(
+        rawVoiceScore !== undefined
+          ? rawVoiceScore <= 10
+            ? rawVoiceScore * 10
+            : rawVoiceScore
+          : 85,
+      );
+
+      const proseDriftFlags = (Array.isArray(prose.output.drift_flags) ? prose.output.drift_flags : [])
+        .map((f: any) =>
+          typeof f === 'string'
+            ? f
+            : typeof f?.flag === 'string'
+              ? f.flag
+              : typeof f?.name === 'string'
+                ? f.name
+                : '',
+        )
+        .filter((f: string): f is 'translation_like' | 'literary' | 'light_novel' | 'format' =>
+          PROSE_DRIFT_FLAGS.has(f),
+        );
+
+      const structureDriftFlags = (
+        Array.isArray(structure.output.drift_flags) ? structure.output.drift_flags : []
+      )
+        .map((f: any) =>
+          typeof f === 'string'
+            ? f
+            : typeof f?.flag === 'string'
+              ? f.flag
+              : typeof f?.name === 'string'
+                ? f.name
+                : '',
+        )
+        .filter((f: string): f is 'western_novel' | 'serial' | 'exposition' | 'cadence' =>
+          STRUCTURE_DRIFT_FLAGS.has(f),
+        );
+
+      const proseDimScores = extractDimensionScores(
+        prose.output.dimension_scores ?? (prose.output as any).rubric_scores,
+      );
+      const structDimScores = extractDimensionScores(
+        structure.output.dimension_scores ?? (structure.output as any).rubric_scores,
+      );
+
       // Every gated dimension of the pinned policy gets its own result, from the policy's own thresholds.
       // A dimension the policy does not gate contributes no result — and therefore no silent pass.
       const gateFor = (name: 'prose' | 'structure' | 'genre' | 'voice') =>
@@ -549,14 +754,14 @@ export async function evaluateVersion(
         sections: {
           prose: section('prose', proseScore, dimensionPassed('prose'), {
             judge_score: proseScore,
-            drift_flags: prose.output.drift_flags ?? [],
-            dimension_scores: prose.output.dimension_scores ?? {},
+            drift_flags: proseDriftFlags,
+            dimension_scores: proseDimScores,
             evaluator_call_id: prose.llmCallId,
           }),
           structure: section('structure', structureScore, dimensionPassed('structure'), {
             judge_score: structureScore,
-            drift_flags: structure.output.drift_flags ?? [],
-            dimension_scores: structure.output.dimension_scores ?? {},
+            drift_flags: structureDriftFlags,
+            dimension_scores: structDimScores,
             ...(structure.output.hook_sentence_index !== undefined
               ? { hook_sentence_index: structure.output.hook_sentence_index }
               : {}),
@@ -570,14 +775,10 @@ export async function evaluateVersion(
           }),
           genre: section('genre', genreScore, dimensionPassed('genre'), {
             judge_score: genreScore,
-            drift_flags: genre.output.drift_flags ?? [],
-            dimension_scores: genre.output.dimension_scores ?? {},
             evaluator_call_id: genre.llmCallId,
           }),
           voice: section('voice', voiceScore, dimensionPassed('voice'), {
             judge_score: voiceScore,
-            drift_flags: voice.output.drift_flags ?? [],
-            dimension_scores: voice.output.dimension_scores ?? {},
             evaluator_call_id: voice.llmCallId,
           }),
           output_language: section(
@@ -591,7 +792,11 @@ export async function evaluateVersion(
           ),
           contract_compliance: section(
             'contract',
-            criteriaResults.every((c) => c.passed) ? 100 : 0,
+            Math.round(
+              (criteriaResults.filter((c) => c.passed).length /
+                Math.max(criteriaResults.length, 1)) *
+                100,
+            ),
             criteriaResults.every((c) => c.passed),
             { evaluator_call_id: contractCall.llmCallId },
           ),

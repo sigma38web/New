@@ -76,6 +76,7 @@ export interface NovelRunTransitionInput {
         lastError?: Record<string, unknown> | null | undefined;
         specVersion?: number | undefined;
         targetChapters?: number | undefined;
+        intakeArtifactId?: string | undefined;
       }
     | undefined;
   event?: { kind: string; payload?: Record<string, unknown> | undefined } | undefined;
@@ -242,6 +243,7 @@ async function transitionNovelRunOnClient(
          last_error = CASE WHEN $9::boolean THEN $10::jsonb ELSE last_error END,
          spec_version = coalesce($11, spec_version),
          target_chapters = coalesce($12, target_chapters),
+         intake_artifact_id = coalesce($16::uuid, intake_artifact_id),
          -- Leaving the queue clears the lease so a later claim starts fresh.
          runner_id = CASE WHEN $2 IN ('planning', 'producing') THEN runner_id ELSE NULL END,
          lease_expires_at = CASE WHEN $2 IN ('planning', 'producing') THEN lease_expires_at ELSE NULL END,
@@ -266,6 +268,7 @@ async function transitionNovelRunOnClient(
         input.expectFrom ? [...input.expectFrom] : null,
         input.lease?.runner ?? null,
         input.lease ? String(input.lease.fence) : null,
+        p.intakeArtifactId ?? null,
       ],
     )
     .catch(rethrowCanon);

@@ -12,6 +12,7 @@
 'use client';
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useAppState } from '../components/app-state';
 import { ProtectedRoute, SignOutButton } from '../screens/auth';
 import { ProjectOverviewScreen, WorkspaceScreen } from '../screens/workspace';
 import { NovelScreen } from '../screens/novel';
@@ -49,11 +50,35 @@ export default function ConsolePage(): ReactNode {
 }
 
 export function Console(): ReactNode {
+  const { workspaceId, restoring } = useAppState();
   const [area, setArea] = useState<WorkAreaId>('workspace');
   const [projectId, setProjectId] = useState<string | undefined>(undefined);
   const [chapterNo, setChapterNo] = useState(1);
   const headingRef = useRef<HTMLDivElement>(null);
   const firstRender = useRef(true);
+
+  // Initialize from URL search parameters on first mount.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const p = params.get('projectId');
+    const a = params.get('area') as WorkAreaId | null;
+    if (p) setProjectId(p);
+    if (a && WORK_AREAS.some((w) => w.id === a)) setArea(a);
+  }, []);
+
+  // Keep URL in sync with active project and work area.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    if (projectId) params.set('projectId', projectId);
+    else params.delete('projectId');
+    if (area && area !== 'workspace') params.set('area', area);
+    else params.delete('area');
+    const qs = params.toString();
+    const newUrl = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
+    window.history.replaceState(null, '', newUrl);
+  }, [projectId, area]);
 
   // Predictable focus after navigation: the new work area receives focus, not the control that opened it.
   useEffect(() => {
@@ -90,7 +115,9 @@ export function Console(): ReactNode {
       </nav>
 
       <div ref={headingRef} tabIndex={-1}>
-        {needsProject && !projectId ? (
+        {restoring || (needsProject && !workspaceId) ? (
+          <p role="status">Loading workspace…</p>
+        ) : needsProject && !projectId ? (
           <p className="note">Select a project from “Workspace and projects” to continue.</p>
         ) : (
           <WorkArea

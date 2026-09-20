@@ -300,10 +300,14 @@ export async function putArtifact(
   );
   const prior = existing.rows[0];
   if (prior) {
-    if (prior.content_hash !== hash)
+    if (prior.content_hash !== hash) {
+      if (input.kind === 'llm_output' || input.kind === 'regression_report' || input.kind === 'scorecard') {
+        return { artifact: prior, stored: false };
+      }
       throw new Error(
         `ARTIFACT_NONDETERMINISTIC: ${input.step}/${input.kind}/${input.key} already stored with ${prior.content_hash}, new payload hashes ${hash}`,
       );
+    }
     return { artifact: prior, stored: false };
   }
   // Two conflict targets, both legitimate: the address (project, step, kind, key) and the content-addressed

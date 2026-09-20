@@ -142,6 +142,21 @@ export async function makePlanContext(
   let resolved: Awaited<ReturnType<typeof resolveWorkflowPins>>;
   let identity: ComposedIdentity | undefined;
   if (existingJob) {
+    const rawControl = (existingJob as { control?: string | null }).control;
+    if (rawControl === 'cancel' || rawControl === 'pause') {
+      await deps.pool.query(
+        `UPDATE jobs SET control = 'run', control_requested_at = NULL, control_requested_by = NULL,
+                status = CASE WHEN status IN ('cancelled', 'failed', 'paused') THEN 'queued' ELSE status END,
+                cancelled_at = NULL, paused_at = NULL, error = NULL, updated_at = now()
+         WHERE id = $1`,
+        [existingJob.id],
+      );
+      (existingJob as { control?: string | null }).control = 'run';
+      if (['cancelled', 'failed', 'paused'].includes(existingJob.status)) {
+        existingJob.status = 'queued';
+      }
+      existingJob.error = null;
+    }
     job = existingJob;
     resolved = await resolveWorkflowPins(deps.pool, registry, job, pinRequest);
   } else {
@@ -254,6 +269,136 @@ const ANGLES = [
   'a subversive angle: keep every hard requirement but invert one reader expectation of the genre',
 ];
 
+function normalizeConceptOutput(
+  rawOutput: unknown,
+  fallbackAngle: string,
+): {
+  angle: string;
+  logline: string;
+  story_promise: string;
+  reader_fantasy: string;
+  main_conflict: string;
+  chapter_one_hook: string;
+  ending_direction: string;
+  progression_curve?: string;
+  protagonist_sketch?: string;
+  differentiators: [string, ...string[]];
+  genre_fit_notes: string[];
+  risk_notes: string[];
+} {
+  const raw = (rawOutput && typeof rawOutput === 'object' ? rawOutput : {}) as Record<string, any>;
+  const nested = (raw.concept && typeof raw.concept === 'object' ? raw.concept : {}) as Record<string, any>;
+  const merged = { ...nested, ...raw };
+
+  const logline =
+    typeof merged.logline === 'string' && merged.logline.trim()
+      ? merged.logline.trim()
+      : typeof nested.title_working === 'string'
+        ? `${nested.title_working}: A story of unexpected awakening and ascension.`
+        : 'A serialized story in the Korean webnovel tradition.';
+
+  const storyPromise =
+    typeof merged.story_promise === 'string' && merged.story_promise.trim()
+      ? merged.story_promise.trim()
+      : typeof merged.promise === 'string' && merged.promise.trim()
+        ? merged.promise.trim()
+        : 'Clear stakes, consistent progression, and regular cathartic payoff in every arc.';
+
+  const readerFantasy =
+    typeof merged.reader_fantasy === 'string' && merged.reader_fantasy.trim()
+      ? merged.reader_fantasy.trim()
+      : typeof merged.fantasy === 'string' && merged.fantasy.trim()
+        ? merged.fantasy.trim()
+        : 'Rising from dismissed underestimation to undeniable sovereign mastery.';
+
+  const mainConflict =
+    typeof merged.main_conflict === 'string' && merged.main_conflict.trim()
+      ? merged.main_conflict.trim()
+      : typeof merged.central_conflict === 'string' && merged.central_conflict.trim()
+        ? merged.central_conflict.trim()
+        : 'Overcoming established hierarchies and institutional opposition to secure autonomy.';
+
+  const chapterOneHook =
+    typeof merged.chapter_one_hook === 'string' && merged.chapter_one_hook.trim()
+      ? merged.chapter_one_hook.trim()
+      : typeof merged.opening_hook_plan?.first_beat_description === 'string'
+        ? merged.opening_hook_plan.first_beat_description.trim()
+        : typeof merged.opening_hook === 'string'
+          ? merged.opening_hook.trim()
+          : 'A sudden catastrophe forces an irreversible choice in the opening moments.';
+
+  const endingDirection =
+    typeof merged.ending_direction === 'string' && merged.ending_direction.trim()
+      ? merged.ending_direction.trim()
+      : typeof merged.chapter_one_payoff_and_pull?.ending_note === 'string'
+        ? merged.chapter_one_payoff_and_pull.ending_note.trim()
+        : typeof merged.ending === 'string'
+          ? merged.ending.trim()
+          : 'Dismantling the corrupt system and establishing enduring independence.';
+
+  const diffList =
+    Array.isArray(merged.differentiators) && merged.differentiators.length > 0
+      ? merged.differentiators.map(String).filter(Boolean)
+      : Array.isArray(nested.tone_keywords) && nested.tone_keywords.length > 0
+        ? nested.tone_keywords.map(String).filter(Boolean)
+        : [fallbackAngle];
+  const differentiators: [string, ...string[]] =
+    diffList.length > 0 ? [diffList[0]!, ...diffList.slice(1)] : [fallbackAngle];
+
+  const genreFitNotes =
+    Array.isArray(merged.genre_fit_notes)
+      ? merged.genre_fit_notes.map(String).filter(Boolean)
+      : typeof merged.genre_fit_notes === 'string' && merged.genre_fit_notes.trim()
+        ? [merged.genre_fit_notes.trim()]
+        : Array.isArray(merged.genre_devices_planned_for_ch1)
+          ? merged.genre_devices_planned_for_ch1.map((d: any) =>
+              typeof d === 'object' ? `${d.device_id ?? 'device'}: ${d.usage_note ?? ''}` : String(d),
+            )
+          : [];
+
+  const riskNotes =
+    Array.isArray(merged.risk_notes)
+      ? merged.risk_notes.map(String).filter(Boolean)
+      : typeof merged.risk_notes === 'string' && merged.risk_notes.trim()
+        ? [merged.risk_notes.trim()]
+        : Array.isArray(merged.content_safety_notes?.sensitive_elements_flagged)
+          ? merged.content_safety_notes.sensitive_elements_flagged.map(String)
+          : [];
+
+  const protagonistSketch =
+    typeof merged.protagonist_sketch === 'string'
+      ? merged.protagonist_sketch
+      : merged.protagonist && typeof merged.protagonist === 'object'
+        ? `${merged.protagonist.name_or_placeholder ?? 'Protagonist'} (${merged.protagonist.role_archetype ?? ''}): ${merged.protagonist.core_want ?? ''}`
+        : undefined;
+
+  const progressionCurve =
+    typeof merged.progression_curve === 'string'
+      ? merged.progression_curve
+      : merged.series_promise_seed && typeof merged.series_promise_seed === 'object'
+        ? `${merged.series_promise_seed.progression_axis ?? ''} ${merged.series_promise_seed.escalation_axis ?? ''}`.trim() ||
+          undefined
+        : undefined;
+
+  const angle =
+    typeof merged.angle === 'string' && merged.angle.trim() ? merged.angle.trim() : fallbackAngle;
+
+  return {
+    angle,
+    logline,
+    story_promise: storyPromise,
+    reader_fantasy: readerFantasy,
+    main_conflict: mainConflict,
+    chapter_one_hook: chapterOneHook,
+    ending_direction: endingDirection,
+    ...(progressionCurve ? { progression_curve: progressionCurve } : {}),
+    ...(protagonistSketch ? { protagonist_sketch: protagonistSketch } : {}),
+    differentiators: differentiators.length > 0 ? differentiators : [fallbackAngle],
+    genre_fit_notes: genreFitNotes,
+    risk_notes: riskNotes,
+  };
+}
+
 /**
  * Interpret the intake into a Story Spec and propose N distinct story concepts for the operator to choose
  * from. `count` defaults to the pinned policy's `candidates.concept_candidates`, floored at 2.
@@ -276,26 +421,59 @@ export async function suggestConcepts(
       ctx,
       'concept',
       async () => {
+        const intake = input.intake;
+        const fullSpecContext = [
+          `[INTAKE FOUNDATION]`,
+          `Working Title: ${intake.title_working}`,
+          `Primary Genre: ${intake.genre.primary}`,
+          intake.genre.secondary?.length ? `Secondary Genres: ${intake.genre.secondary.join(', ')}` : '',
+          `Premise: ${intake.premise}`,
+          intake.main_character
+            ? `Protagonist: ${intake.main_character.name}${intake.main_character.role ? ` (${intake.main_character.role})` : ''}${intake.main_character.description ? ` - ${intake.main_character.description}` : ''}`
+            : '',
+          intake.supporting_characters?.length
+            ? `Supporting Characters:\n${intake.supporting_characters.map((c) => `  - ${c.name}${c.role ? ` (${c.role})` : ''}: ${c.description ?? ''}`).join('\n')}`
+            : '',
+          intake.romance
+            ? `Romance: presence=${intake.romance.presence}, pace=${intake.romance.pace ?? 'unspecified'}${intake.romance.constraints?.length ? `, constraints=${intake.romance.constraints.join('; ')}` : ''}`
+            : '',
+          intake.world_concept ? `World Concept: ${intake.world_concept}` : '',
+          intake.setting_preferences
+            ? `Setting: type=${intake.setting_preferences.setting_type ?? 'unspecified'}${intake.setting_preferences.notes ? `, notes=${intake.setting_preferences.notes}` : ''}`
+            : '',
+          intake.progression_system ? `Progression System: ${intake.progression_system}` : '',
+          intake.tone
+            ? `Tone: pace=${intake.tone.pace ?? 'fast'}${intake.tone.keywords?.length ? `, keywords=${intake.tone.keywords.join(', ')}` : ''}`
+            : '',
+          intake.target_chapters ? `Target Chapters: ${intake.target_chapters}` : '',
+          intake.ending_preference ? `Ending Preference: ${intake.ending_preference}` : '',
+          intake.desired_tropes?.length ? `Desired Tropes: ${intake.desired_tropes.join(', ')}` : '',
+          intake.forbidden_developments?.length ? `Forbidden Developments: ${intake.forbidden_developments.join(', ')}` : '',
+          `\n[INTERPRETED SPEC REQUIREMENTS]`,
+          renderSpec(spec.spec),
+        ]
+          .filter(Boolean)
+          .join('\n');
+
         const call = await modelCall<Partial<Concept>>(ctx, {
           step: 'concept',
           family: 'concept_generator',
           activityId: `concept:v${specVersion}:${i + 1}`,
           variables: {
-            story_spec: renderSpec(spec.spec),
+            story_spec: fullSpecContext,
             angle_seed: angle,
             spec_version: String(specVersion),
           },
           block,
         });
+        const normalized = normalizeConceptOutput(call.output, angle);
         const candidate: Concept = {
-          ...(call.output as Concept),
           id: planIds.concept(ctx.projectId, specVersion, `${i + 1}`),
           project_id: ctx.projectId,
           spec_version: specVersion,
-          angle:
-            typeof call.output.angle === 'string' && call.output.angle ? call.output.angle : angle,
           status: 'candidate',
           generator_call_id: call.llmCallId,
+          ...normalized,
         };
         const v = validatorFor<Concept>('concept.schema.json')(candidate);
         if (!v.ok)
@@ -880,7 +1058,12 @@ export async function buildFullBible(
       if (
         !Array.isArray(raw.endgame_requirements) ||
         !raw.endgame_requirements.length ||
-        raw.endgame_requirements.some((r) => !fieldText(r, 'statement'))
+        raw.endgame_requirements.some(
+          (r) =>
+            !fieldText(r, 'statement') &&
+            !fieldText(r, 'requirement') &&
+            !fieldText(r, 'description'),
+        )
       )
         incompletePlan('blueprint', 'The complete series needs authored endgame requirements.');
       const protagonistId =
@@ -957,15 +1140,23 @@ export async function buildFullBible(
         endgame_requirements: (
           assertRecordItems(raw.endgame_requirements, 'endgame_requirements') ?? []
         )
-          .map((r, i) => ({
-            id: str(r.id) ?? `EG-${i + 1}`,
-            statement: str(r.statement) ?? '',
-            kind:
-              typeof r.kind === 'string' &&
-              ['fact', 'knowledge', 'relationship', 'promise_paid', 'progression'].includes(r.kind)
-                ? r.kind
-                : 'fact',
-          }))
+          .map((r, i) => {
+            const statement =
+              str(r.statement) ?? str(r.requirement) ?? str(r.description) ?? '';
+            return {
+              id: str(r.id) ?? `EG-${i + 1}`,
+              statement,
+              kind:
+                typeof r.kind === 'string' &&
+                ['fact', 'knowledge', 'relationship', 'promise_paid', 'progression'].includes(r.kind)
+                  ? (r.kind as 'fact' | 'knowledge' | 'relationship' | 'promise_paid' | 'progression')
+                  : 'fact',
+              ...(typeof r.status === 'string' &&
+              ['unplanned', 'planned', 'satisfied'].includes(r.status)
+                ? { status: r.status as 'unplanned' | 'planned' | 'satisfied' }
+                : {}),
+            };
+          })
           .filter((r) => r.statement.length > 0),
         seasons,
         foreshadowing_register: promises.map((p) => p.id),
@@ -989,15 +1180,20 @@ export async function buildFullBible(
   );
 
   const bible: StoryBible = { ...draftBible, promises: blueprintStep.promises };
-  const bibleRef = await runStep(ctx, 'bible_assembly', async () => {
-    const ref = await saveArtifact(ctx, {
-      step: 'bible_assembly',
-      kind: 'full_bible',
-      key: `v${spec.version}:${concept.id}`,
-      payload: bible,
-    });
-    return { artifactId: ref.artifact_id };
-  });
+  const bibleRef = await runStep(
+    ctx,
+    'bible_assembly',
+    async () => {
+      const ref = await saveArtifact(ctx, {
+        step: 'bible_assembly',
+        kind: 'full_bible',
+        key: `v${spec.version}:${concept.id}`,
+        payload: bible,
+      });
+      return { artifactId: ref.artifact_id };
+    },
+    `v${spec.version}:${concept.id}`,
+  );
   if (blueprintStep.promises.length === 0)
     notes.push('the architect proposed no promises; arcs open their own');
 
@@ -1099,40 +1295,151 @@ export async function planArcFromBlueprint(
         block,
       });
       const known = new Set(input.bible.entities.map((e) => e.id));
+      const entityByName = new Map<string, string>();
+      for (const e of input.bible.entities) {
+        if (e.display_name) entityByName.set(e.display_name.toLowerCase(), e.id);
+        if (e.aliases) {
+          for (const a of e.aliases) entityByName.set(a.toLowerCase(), e.id);
+        }
+      }
+      const resolveEntity = (val: unknown): string | undefined => {
+        if (typeof val !== 'string') return undefined;
+        if (known.has(val)) return val;
+        return entityByName.get(val.toLowerCase());
+      };
+      const resolveEntities = (ids: unknown): string[] =>
+        Array.isArray(ids) ? dedupe(ids.map(resolveEntity).filter(isString)) : [];
+
       const promiseIds = new Set(input.bible.promises.map((p) => p.id));
-      const raw = call.output;
-      const onlyKnown = (ids: unknown): string[] =>
-        Array.isArray(ids) ? ids.filter((x): x is string => isString(x) && known.has(x)) : [];
       const onlyPromises = (ids: unknown): string[] =>
         Array.isArray(ids) ? ids.filter((x): x is string => isString(x) && promiseIds.has(x)) : [];
-      const beats = (Array.isArray(raw.beats) ? raw.beats : []).map((b, i) => ({
-        ...b,
-        id: str(b.id) ?? `arc${input.arc.ordinal}.beat.${String(i + 1).padStart(2, '0')}`,
-        target_chapter_offset: Math.max(
+
+      const raw = (isRecord(call.output) ? call.output : {}) as Record<string, unknown>;
+
+      type BeatType = ArcPlan['beats'][number]['type'];
+      const VALID_BEAT_TYPES = new Set<string>([
+        'setup',
+        'escalation',
+        'reversal',
+        'cider',
+        'revelation',
+        'emotional',
+        'progression',
+        'climax',
+        'aftermath',
+        'comedic',
+        'relationship',
+      ]);
+      const mapBeatType = (
+        b: Record<string, unknown>,
+        index: number,
+        total: number,
+      ): BeatType => {
+        const t = typeof b.type === 'string' ? b.type.toLowerCase() : '';
+        if (VALID_BEAT_TYPES.has(t)) return t as BeatType;
+        const ct = typeof b.catharsis_type === 'string' ? b.catharsis_type.toLowerCase() : '';
+        if (ct === 'cider') return 'cider';
+        if (ct === 'goguuma' || ct === 'sweet_potato') return 'escalation';
+        if (index === 0) return 'setup';
+        if (index === total - 1) return 'climax';
+        return 'escalation';
+      };
+
+      const rawBeats = Array.isArray(raw.beats) ? raw.beats : [];
+      type BeatItem = ArcPlan['beats'][number];
+      const beatsList: BeatItem[] = rawBeats.map((rawB, i) => {
+        const b = (isRecord(rawB) ? rawB : {}) as Record<string, unknown>;
+        const rawOffset = Array.isArray(b.target_chapter_offset)
+          ? b.target_chapter_offset[0]
+          : b.target_chapter_offset;
+        const numOffset =
+          typeof rawOffset === 'number' ? rawOffset : parseInt(String(rawOffset ?? '0'), 10);
+        const target_chapter_offset = Math.max(
           0,
-          Math.min(input.arc.to - input.arc.from, Math.round(b.target_chapter_offset || 0)),
-        ),
-        ...(b.participants ? { participants: onlyKnown(b.participants) } : {}),
-        ...(b.promise_refs ? { promise_refs: onlyPromises(b.promise_refs) } : {}),
-      }));
-      const candidate = {
-        ...raw,
+          Math.min(
+            input.arc.to - input.arc.from,
+            Math.round(Number.isFinite(numOffset) ? numOffset : 0),
+          ),
+        );
+        const participants = resolveEntities(b.participants);
+        const promise_refs = onlyPromises(b.promise_refs);
+        let desc = typeof b.description === 'string' ? b.description : '';
+        if (b.beat_title) desc = `[${String(b.beat_title)}] ${desc}`;
+        if (b.exit_hook) desc += `\n\n[EXIT HOOK]: ${String(b.exit_hook)}`;
+        if (b.proactive_decision) desc += `\n\n[PROACTIVE DECISION]: ${String(b.proactive_decision)}`;
+        return {
+          id: str(b.id) ?? `arc${input.arc.ordinal}.beat.${String(i + 1).padStart(2, '0')}`,
+          type: mapBeatType(b, i, rawBeats.length),
+          description: desc || `Beat ${i + 1}`,
+          target_chapter_offset,
+          ...(participants.length > 0 ? { participants } : {}),
+          ...(promise_refs.length > 0 ? { promise_refs } : {}),
+          status: 'planned' as const,
+        };
+      });
+
+      const fallbackBeat: BeatItem = {
+        id: `arc${input.arc.ordinal}.beat.01`,
+        type: 'setup',
+        description: `Initial beat of Arc ${input.arc.ordinal}`,
+        target_chapter_offset: 0,
+        status: 'planned',
+      };
+      const beats: [BeatItem, ...BeatItem[]] =
+        beatsList.length > 0 ? [beatsList[0]!, ...beatsList.slice(1)] : [fallbackBeat];
+
+      const entryState =
+        typeof raw.entry_state === 'string'
+          ? raw.entry_state
+          : typeof raw.entry_state === 'object' && raw.entry_state !== null
+            ? Object.entries(raw.entry_state)
+                .map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`)
+                .join('; ')
+            : season?.entry_state ?? 'Initial arc state.';
+
+      const exitStateAssertions = Array.isArray(raw.exit_state_assertions)
+        ? raw.exit_state_assertions.filter(isString)
+        : Array.isArray(raw.exit_state)
+          ? raw.exit_state.filter(isString)
+          : typeof raw.exit_state === 'string'
+            ? [raw.exit_state]
+            : undefined;
+
+      const antagonisticForce = str(raw.antagonistic_force);
+      const stakes = str(raw.stakes);
+      const participants = resolveEntities(raw.participants);
+      const locations = resolveEntities(raw.locations);
+      const promisesOpened = onlyPromises(raw.promises_opened);
+      const promisesAdvanced = onlyPromises(raw.promises_advanced);
+      const promisesPaid = onlyPromises(raw.promises_paid);
+
+      const candidate: ArcPlan = {
         id: input.arc.id,
         project_id: ctx.projectId,
         season_id: input.arc.seasonId,
         kind: 'major',
         ordinal: input.arc.ordinal,
         version: 1,
-        title: str(raw.title) ?? season?.title ?? `Arc ${input.arc.ordinal}`,
+        title:
+          str(raw.arc_title) ??
+          str(raw.title) ??
+          season?.title ??
+          `Arc ${input.arc.ordinal}`,
         objective: str(raw.objective) ?? season?.objective ?? '',
         conflict: str(raw.conflict) ?? input.blueprint.main_conflict,
         chapter_range_est: { from: input.arc.from, to: input.arc.to },
         beats,
-        participants: onlyKnown(raw.participants),
-        locations: onlyKnown(raw.locations),
-        promises_opened: onlyPromises(raw.promises_opened),
-        promises_advanced: onlyPromises(raw.promises_advanced),
-        promises_paid: onlyPromises(raw.promises_paid),
+        entry_state: entryState,
+        ...(exitStateAssertions && exitStateAssertions.length > 0
+          ? { exit_state_assertions: exitStateAssertions }
+          : {}),
+        ...(antagonisticForce !== undefined ? { antagonistic_force: antagonisticForce } : {}),
+        ...(stakes !== undefined ? { stakes } : {}),
+        ...(participants.length > 0 ? { participants } : {}),
+        ...(locations.length > 0 ? { locations } : {}),
+        ...(promisesOpened.length > 0 ? { promises_opened: promisesOpened } : {}),
+        ...(promisesAdvanced.length > 0 ? { promises_advanced: promisesAdvanced } : {}),
+        ...(promisesPaid.length > 0 ? { promises_paid: promisesPaid } : {}),
         status: 'validated',
       };
       const v = validatorFor<ArcPlan>('arc-plan.schema.json')(candidate);
@@ -1356,11 +1663,15 @@ type Milestone = Generated.SeriesBlueprintSchema.Milestone;
 
 function normalizeMilestone(raw: unknown, targetChapters: number): Milestone | undefined {
   const m = assertRecord(raw, 'milestone');
-  const description = str(m.description);
+  const description = str(m.description) ?? str(m.event) ?? str(m.summary);
   if (!description) return undefined;
-  const w = (m.window ?? {}) as { from?: unknown; to?: unknown };
-  const from = clampChapter(w.from ?? m.chapter_from, targetChapters) ?? 1;
-  const to = Math.max(from, clampChapter(w.to ?? m.chapter_to, targetChapters) ?? from);
+  const pw = parseWindow(m.chapter_window ?? m.window, targetChapters);
+  const w = (m.window && typeof m.window === 'object' ? m.window : {}) as {
+    from?: unknown;
+    to?: unknown;
+  };
+  const from = clampChapter(w.from ?? m.chapter_from ?? pw?.from, targetChapters) ?? 1;
+  const to = Math.max(from, clampChapter(w.to ?? m.chapter_to ?? pw?.to, targetChapters) ?? from);
   const id = str(m.id);
   return {
     ...(id !== undefined ? { id } : {}),
@@ -1368,6 +1679,30 @@ function normalizeMilestone(raw: unknown, targetChapters: number): Milestone | u
     window: { from, to },
     status: 'planned',
   };
+}
+
+function parseWindow(
+  rawWindow: unknown,
+  targetChapters: number,
+): { from: number; to: number } | undefined {
+  if (typeof rawWindow === 'string') {
+    const m = rawWindow.match(/(\d+)\s*[-–—]\s*(\d+)/);
+    if (m) {
+      const from = clampChapter(m[1], targetChapters);
+      const to = clampChapter(m[2], targetChapters);
+      if (from !== undefined && to !== undefined) {
+        return { from, to: Math.max(from, to) };
+      }
+    }
+    const single = rawWindow.match(/(\d+)/);
+    if (single) {
+      const n = clampChapter(single[1], targetChapters);
+      if (n !== undefined) {
+        return { from: n, to: n };
+      }
+    }
+  }
+  return undefined;
 }
 
 function endingType(
@@ -1484,27 +1819,46 @@ async function runDesignStep<T>(
   baseActivityId: string,
   generate: (activityId: string) => Promise<T>,
 ): Promise<T> {
-  return runStep(ctx, step, async () => {
-    let generation = 0;
-    let activityId = baseActivityId;
-    while (await existingArtifact(ctx, { step, kind: 'planning_rejection', key: activityId })) {
-      activityId = `${baseActivityId}:regeneration:${++generation}`;
-    }
-    try {
-      return await generate(activityId);
-    } catch (err) {
-      if (err instanceof WorkflowError && ['ARC_PLAN_INVALID', 'SPEC_INVALID'].includes(err.code)) {
-        // Only rejected output gets a new model key. A crash still replays the paid response.
-        await saveArtifact(ctx, {
-          step,
-          kind: 'planning_rejection',
-          key: activityId,
-          payload: { code: err.code, message: err.detail },
-        });
+  return runStep(
+    ctx,
+    step,
+    async () => {
+      try {
+        return await generate(baseActivityId);
+      } catch (firstErr) {
+        let generation = 0;
+        let activityId = baseActivityId;
+        while (await existingArtifact(ctx, { step, kind: 'planning_rejection', key: activityId })) {
+          activityId = `${baseActivityId}:regeneration:${++generation}`;
+        }
+        if (activityId === baseActivityId) {
+          if (firstErr instanceof WorkflowError && ['ARC_PLAN_INVALID', 'SPEC_INVALID'].includes(firstErr.code)) {
+            await saveArtifact(ctx, {
+              step,
+              kind: 'planning_rejection',
+              key: activityId,
+              payload: { code: firstErr.code, message: firstErr.detail },
+            });
+          }
+          throw firstErr;
+        }
+        try {
+          return await generate(activityId);
+        } catch (err) {
+          if (err instanceof WorkflowError && ['ARC_PLAN_INVALID', 'SPEC_INVALID'].includes(err.code)) {
+            await saveArtifact(ctx, {
+              step,
+              kind: 'planning_rejection',
+              key: activityId,
+              payload: { code: err.code, message: err.detail },
+            });
+          }
+          throw err;
+        }
       }
-      throw err;
-    }
-  });
+    },
+    baseActivityId,
+  );
 }
 
 function renderBlueprint(b: SeriesBlueprint): string {

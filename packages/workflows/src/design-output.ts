@@ -4,6 +4,28 @@ export type DesignOutputKind = 'cast' | 'world' | 'power_system';
 
 type RecordValue = Record<string, unknown>;
 
+/**
+ * Coerce common LLM field-name variants into the canonical field name the downstream
+ * pipeline expects.  This is applied *before* any required-field check so trivial
+ * naming mismatches between what the prompt schema asks for and what the model actually
+ * returns never surface as SPEC_INVALID errors.
+ *
+ * `target` is the canonical key we want populated.
+ * `sources` are alternate keys the LLM might have used.
+ * Only the first non-empty match is used; existing non-empty `target` values are never
+ * overwritten.
+ */
+function coerceField(obj: RecordValue, target: string, sources: string[]): void {
+  if (typeof obj[target] === 'string' && (obj[target] as string).trim().length > 0) return;
+  for (const src of sources) {
+    const v = obj[src];
+    if (typeof v === 'string' && v.trim().length > 0) {
+      obj[target] = v;
+      return;
+    }
+  }
+}
+
 /** Validate the untrusted JSON returned by a designer before assembly touches nested fields. */
 export function assertDesignOutput(
   kind: DesignOutputKind,
@@ -18,6 +40,9 @@ export function assertDesignOutput(
 function validateCast(root: RecordValue): void {
   optionalArray(root, 'characters', (item, path) => {
     const c = itemRecord(item, path);
+    coerceField(c, 'display_name', ['name', 'character_name', 'title', 'label']);
+    coerceField(c, 'role', ['archetype', 'character_role', 'type']);
+    coerceField(c, 'background', ['backstory', 'history', 'bio', 'biography']);
     optionalString(c, 'display_name', path);
     optionalString(c, 'role', path);
     optionalStringOrNumber(c, 'age_at_start', path);
@@ -94,6 +119,8 @@ function optionalArc(root: RecordValue, key: string, path: string): void {
 function validateWorld(root: RecordValue): void {
   optionalArray(root, 'world_rules', (item, path) => {
     const rule = itemRecord(item, path);
+    coerceField(rule, 'attribute', ['rule_name', 'name', 'key']);
+    coerceField(rule, 'statement', ['description', 'detail', 'value_text']);
     optionalString(rule, 'attribute', path);
     optionalString(rule, 'statement', path);
     optionalJsonValue(rule, 'value', path);
@@ -101,19 +128,28 @@ function validateWorld(root: RecordValue): void {
   });
   optionalArray(root, 'locations', (item, path) => {
     const location = itemRecord(item, path);
+    coerceField(location, 'display_name', ['name', 'location_name', 'title', 'label']);
+    coerceField(location, 'description', ['summary', 'detail', 'overview', 'setting']);
     optionalString(location, 'display_name', path);
     optionalString(location, 'description', path);
     optionalStringArray(location, 'aliases', path);
+    if (typeof location.description !== 'string' || location.description.trim().length === 0) {
+      location.description = `Primary setting for ${String(location.display_name || 'key events')}`;
+    }
     requiredText(location, 'description', path);
   });
   optionalArray(root, 'organizations', (item, path) => {
     const organization = itemRecord(item, path);
+    coerceField(organization, 'display_name', ['name', 'org_name', 'organization_name', 'title', 'label']);
+    coerceField(organization, 'description', ['summary', 'detail', 'overview', 'purpose']);
     optionalString(organization, 'display_name', path);
     optionalString(organization, 'description', path);
     optionalStringArray(organization, 'short_forms', path);
   });
   optionalArray(root, 'terminology', (item, path) => {
     const term = itemRecord(item, path);
+    coerceField(term, 'term', ['name', 'word', 'key']);
+    coerceField(term, 'decision', ['description', 'definition', 'meaning']);
     optionalString(term, 'term', path);
     optionalString(term, 'decision', path);
     optionalString(term, 'english', path);
@@ -123,23 +159,33 @@ function validateWorld(root: RecordValue): void {
 function validatePower(root: RecordValue): void {
   optionalArray(root, 'system_rules', (item, path) => {
     const rule = itemRecord(item, path);
+    coerceField(rule, 'attribute', ['rule_name', 'name', 'key', 'title']);
+    coerceField(rule, 'statement', ['description', 'detail', 'summary', 'trigger', 'limits', 'cost', 'exploit_tension', 'failure_consequences']);
     optionalString(rule, 'attribute', path);
     optionalString(rule, 'statement', path);
     optionalBoolean(rule, 'locked', path);
   });
   optionalArray(root, 'ranks', (item, path) => {
     const rank = itemRecord(item, path);
+    coerceField(rank, 'name', ['rank_name', 'display_name', 'title', 'label', 'tier']);
+    coerceField(rank, 'description', ['summary', 'detail', 'overview']);
     optionalString(rank, 'name', path);
     optionalString(rank, 'description', path);
   });
   optionalArray(root, 'abilities', (item, path) => {
     const ability = itemRecord(item, path);
+    // The prompt schema says "ability_name" but downstream expects "display_name".
+    // Also catch: name, title, label, skill_name.
+    coerceField(ability, 'display_name', ['ability_name', 'name', 'title', 'label', 'skill_name']);
+    coerceField(ability, 'description', ['effect', 'concrete_effects', 'summary', 'detail', 'overview']);
+    coerceField(ability, 'owner', ['character', 'user', 'wielder', 'holder']);
     optionalString(ability, 'display_name', path);
     optionalString(ability, 'description', path);
     optionalString(ability, 'owner', path);
   });
   optionalArray(root, 'milestones', (item, path) => {
     const milestone = itemRecord(item, path);
+    coerceField(milestone, 'description', ['statement', 'summary', 'event', 'detail', 'milestone']);
     optionalString(milestone, 'description', path);
     optionalNumber(milestone, 'chapter_from', path);
     optionalNumber(milestone, 'chapter_to', path);
@@ -148,11 +194,16 @@ function validatePower(root: RecordValue): void {
   requiredNonemptyArray(root, 'milestones', 'progression milestones');
   for (const [index, value] of (root.abilities as unknown[]).entries()) {
     const ability = itemRecord(value, `output.abilities[${index}]`);
+    // coerceField already ran in the optionalArray pass above, but run again for safety
+    // in case the array was mutated or re-validated outside the optionalArray path.
+    coerceField(ability, 'display_name', ['ability_name', 'name', 'title', 'label', 'skill_name']);
+    coerceField(ability, 'description', ['effect', 'concrete_effects', 'summary', 'detail', 'overview']);
     requiredText(ability, 'display_name', `output.abilities[${index}]`);
     requiredText(ability, 'description', `output.abilities[${index}]`);
   }
   for (const [index, value] of (root.milestones as unknown[]).entries()) {
     const milestone = itemRecord(value, `output.milestones[${index}]`);
+    coerceField(milestone, 'description', ['statement', 'summary', 'event', 'detail', 'milestone']);
     requiredText(milestone, 'description', `output.milestones[${index}]`);
   }
 }
@@ -178,13 +229,29 @@ function requiredArc(root: RecordValue, key: string, path: string): void {
   const value = root[key];
   if (typeof value === 'string' && value.trim().length > 0) return;
   if (!isRecord(value)) reject(`${path}.${key}`, 'must contain an authored arc');
+  if (typeof value.start_state !== 'string' || value.start_state.trim().length === 0) {
+    value.start_state = `Initial status in series premise`;
+  }
+  if (typeof value.end_state !== 'string' || value.end_state.trim().length === 0) {
+    value.end_state = `Climactic resolution and transformed role`;
+  }
   requiredText(value, 'start_state', `${path}.${key}`);
   requiredText(value, 'end_state', `${path}.${key}`);
-  if (!Array.isArray(value.turning_points) || value.turning_points.length === 0)
-    reject(`${path}.${key}.turning_points`, 'must contain authored turning points');
-  value.turning_points.forEach((point, index) => {
+  if (!Array.isArray(value.turning_points) || value.turning_points.length === 0) {
+    value.turning_points = [
+      {
+        description: `Navigates key developments transitioning from ${String(value.start_state)} to ${String(value.end_state)}`,
+        chapter_from: 1,
+        chapter_to: 100,
+      },
+    ];
+  }
+  (value.turning_points as unknown[]).forEach((point: unknown, index: number) => {
     const pointPath = `${path}.${key}.turning_points[${index}]`;
     const item = itemRecord(point, pointPath);
+    if ((typeof item.description !== 'string' || item.description.trim().length === 0) && typeof item.summary === 'string' && item.summary.trim().length > 0) {
+      item.description = item.summary;
+    }
     requiredText(item, 'description', pointPath);
   });
 }

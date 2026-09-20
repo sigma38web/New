@@ -24,6 +24,7 @@
  * The endpoint is configuration, and it is validated: only http/https, and by default only loopback, so a
  * misconfigured or attacker-supplied endpoint cannot be used to reach internal services (SSRF).
  */
+import { Agent, fetch as undiciFetch } from 'undici';
 import { CancellationError } from './cancellation.js';
 import { ProviderFailure, type FailureClass } from './failures.js';
 import {
@@ -98,6 +99,7 @@ function parseUsage(raw: unknown): ProviderResponse['usage'] | undefined {
 export class HttpProvider implements Provider {
   readonly name: string;
   private readonly endpoint: URL;
+  private readonly dispatcher: Agent;
 
   constructor(private readonly opts: HttpProviderOptions) {
     this.name = opts.name;
@@ -118,6 +120,12 @@ export class HttpProvider implements Provider {
       );
     }
     this.endpoint = url;
+    const timeout = (opts.timeoutMs ?? 600_000) + 120_000;
+    this.dispatcher = new Agent({
+      headersTimeout: timeout,
+      bodyTimeout: timeout,
+      connectTimeout: 60_000,
+    });
   }
 
   /**
@@ -166,7 +174,7 @@ export class HttpProvider implements Provider {
 
     try {
       const url = new URL('/v1/complete', this.endpoint);
-      const response = await fetch(url, {
+      const response = (await undiciFetch(url, {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...(this.opts.headers ?? {}) },
         body: JSON.stringify({
@@ -177,7 +185,8 @@ export class HttpProvider implements Provider {
           idempotencyKey: req.trace?.idempotencyKey,
         }),
         signal: controller.signal,
-      });
+        dispatcher: this.dispatcher,
+      })) as unknown as Response;
 
       if (!response.ok) {
         throw new ProviderFailure(

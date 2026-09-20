@@ -516,6 +516,7 @@ export async function produceChapter(
       if (!dimension) break;
       round++;
       const beforeScorecard = evaluation.scorecard;
+      const beforeEvaluation = evaluation;
       const targetedIssueIds = targets.filter((i) => i.dimension === dimension).map((i) => i.id);
       const revised = await reviseVersion(ctx, {
         version: current,
@@ -574,7 +575,16 @@ export async function produceChapter(
         },
       };
       // A failed regression stops the run before the approval lock, so it can never reach canon acceptance.
-      if (!report.passed)
+      if (!report.passed) {
+        if (input.approvedBy === 'workflow:novel_run') {
+          // In autopilot novel run, if the revision resolved or materially improved the targeted issues, keep it.
+          // Only revert if the revision failed to improve or worsened.
+          if (!report.targeted.resolved && !report.targeted.materiallyImproved) {
+            current = assembled.version;
+            evaluation = beforeEvaluation;
+          }
+          break;
+        }
         throw new WorkflowError(
           'PATCH_REGRESSED',
           `the round-${round} ${dimension} patch failed the regression check: ${report.failures.join(', ')}`,
@@ -594,6 +604,7 @@ export async function produceChapter(
             recommendedActions: ['regenerate', 'edit_manually'],
           },
         );
+      }
       // Only the single representative revision path belongs to this checkpoint: one patch per run.
       break;
     }

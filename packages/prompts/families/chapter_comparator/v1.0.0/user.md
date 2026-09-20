@@ -1,4 +1,4 @@
-[CONTRACT SHAPE — required hook / opening / ending / satisfaction / length target]
+[CONTRACT SHAPE — required hook / opening / ending / satisfaction / cider-sweetpotato ratio / milestone type / reaction beats / length target]
 {{contract_shape}}
 
 Presentation order: {{presentation_order}}

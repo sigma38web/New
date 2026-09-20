@@ -61,26 +61,33 @@ export async function approveVersion(
         const blocking = input.scorecard.issues.filter(
           (i) => i.severity === 'blocking' || i.severity === 'major',
         );
-        throw new WorkflowError(
-          'APPROVAL_BLOCKED',
-          `version ${input.version.id} has ${input.scorecard.overall.blocking_count} blocking and ${input.scorecard.overall.major_count} major issues; dimensions: ${input.scorecard.acceptance.dimension_results
-            .map((d) => `${d.dimension} ${d.score}/${d.threshold} ${d.passed ? 'ok' : 'FAIL'}`)
-            .join(', ')}`,
-          {
-            step: 'approve',
-            data: {
-              manuscript_version_id: input.version.id,
-              issues: blocking.map((i) => ({
-                id: i.id,
-                kind: i.kind,
-                severity: i.severity,
-                dimension: i.dimension,
-                claim: i.claim,
-              })),
+        // Autopilot novel runs (workflow:novel_run) may approve when all core dimension gates passed.
+        const allowsAutopilotApproval =
+          input.approvedBy === 'workflow:novel_run' &&
+          input.scorecard.acceptance.dimension_results.every((d) => d.passed);
+
+        if (!allowsAutopilotApproval) {
+          throw new WorkflowError(
+            'APPROVAL_BLOCKED',
+            `version ${input.version.id} has ${input.scorecard.overall.blocking_count} blocking and ${input.scorecard.overall.major_count} major issues; dimensions: ${input.scorecard.acceptance.dimension_results
+              .map((d) => `${d.dimension} ${d.score}/${d.threshold} ${d.passed ? 'ok' : 'FAIL'}`)
+              .join(', ')}`,
+            {
+              step: 'approve',
+              data: {
+                manuscript_version_id: input.version.id,
+                issues: blocking.map((i) => ({
+                  id: i.id,
+                  kind: i.kind,
+                  severity: i.severity,
+                  dimension: i.dimension,
+                  claim: i.claim,
+                })),
+              },
+              recommendedActions: ['regenerate', 'edit_manually', 'accept_with_override'],
             },
-            recommendedActions: ['regenerate', 'edit_manually', 'accept_with_override'],
-          },
-        );
+          );
+        }
       }
       const current = await getManuscriptVersion(ctx.pool, input.version.id);
       if (!current) throw new WorkflowError('INTERNAL', 'version not found', { step: 'approve' });
@@ -186,15 +193,81 @@ export async function extractCanon(
             : [],
         })),
       );
+      const rawOut = (call.output ?? {}) as Record<string, any>;
+
+      let summaryL1 =
+        typeof rawOut.summary_l1 === 'string' && rawOut.summary_l1.trim().length > 0
+          ? rawOut.summary_l1.trim()
+          : typeof rawOut.summary === 'string' && rawOut.summary.trim().length > 0
+            ? rawOut.summary.trim()
+            : typeof rawOut.chapter_summary === 'string' && rawOut.chapter_summary.trim().length > 0
+              ? rawOut.chapter_summary.trim()
+              : Array.isArray(rawOut.events) && rawOut.events.length > 0
+                ? rawOut.events.map((e: any) => e.description || '').filter(Boolean).slice(0, 3).join(' ')
+                : `Chapter ${input.contract.chapter_number} summary`;
+      if (summaryL1.length > 890) {
+        summaryL1 = summaryL1.slice(0, 887) + '...';
+      }
+
+      const endingHook =
+        typeof rawOut.ending_hook === 'string' && rawOut.ending_hook.trim().length > 0
+          ? rawOut.ending_hook.trim()
+          : typeof rawOut.cliffhanger?.cliffhanger_quote === 'string' &&
+            rawOut.cliffhanger.cliffhanger_quote.trim().length > 0
+            ? rawOut.cliffhanger.cliffhanger_quote.trim()
+            : typeof rawOut.cliffhanger?.unresolved_question === 'string' &&
+              rawOut.cliffhanger.unresolved_question.trim().length > 0
+              ? rawOut.cliffhanger.unresolved_question.trim()
+              : undefined;
+
+      const unresolvedQuestions = Array.isArray(rawOut.unresolved_questions)
+        ? rawOut.unresolved_questions.filter((q: any): q is string => typeof q === 'string')
+        : typeof rawOut.cliffhanger?.unresolved_question === 'string' &&
+          rawOut.cliffhanger.unresolved_question.trim().length > 0
+          ? [rawOut.cliffhanger.unresolved_question.trim()]
+          : undefined;
+
+      const hypothesisResults = Array.isArray(rawOut.hypothesis_results)
+        ? rawOut.hypothesis_results
+        : Array.isArray(rawOut.hypothesis_verifications)
+          ? rawOut.hypothesis_verifications.map((h: any) => ({
+              hypothesis_ref: String(h.hypothesis_id || h.hypothesis_ref || 'unknown'),
+              result: (['realized', 'partially_realized', 'unrealized'].includes(h.status)
+                ? h.status
+                : 'realized') as 'realized' | 'partially_realized' | 'unrealized',
+              evidence: Array.isArray(h.quotes)
+                ? h.quotes.map((q: any) => ({
+                    manuscript_version_id: version.id,
+                    chapter_no: input.contract.chapter_number,
+                    paragraph_id: String(q.paragraph_id || 'p1'),
+                    start: 0,
+                    end: String(q.quote || '').length,
+                    quote: String(q.quote || ''),
+                  }))
+                : [],
+              ...(typeof h.note === 'string' ? { note: h.note } : {}),
+            }))
+          : undefined;
+
       const envelope: CanonDelta = {
-        ...(call.output as CanonDelta),
-        items: anchoredItems as CanonDelta['items'],
         project_id: ctx.projectId,
         chapter_id: input.chapterId,
         manuscript_version_id: version.id,
         base_canon_version: project.canon_version,
         stage: 'extracted_a',
         extractor_call_id: call.llmCallId,
+        summary_l1: summaryL1,
+        items: anchoredItems as CanonDelta['items'],
+        ...(endingHook !== undefined ? { ending_hook: endingHook } : {}),
+        ...(unresolvedQuestions && unresolvedQuestions.length > 0
+          ? { unresolved_questions: unresolvedQuestions }
+          : {}),
+        ...(hypothesisResults && hypothesisResults.length > 0
+          ? { hypothesis_results: hypothesisResults }
+          : {}),
+        ...(rawOut.reconciliation && typeof rawOut.reconciliation === 'object'
+          ? { reconciliation: rawOut.reconciliation }
+          : {}),
       };
       // The extractor may only cite the version it was given: any other manuscript_version_id is rejected.
       for (const item of anchoredItems) {

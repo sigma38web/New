@@ -9,21 +9,61 @@ export type GenreId =
   | 'hunter-gate'
   | 'system-progression'
   | 'regression'
+  | 'transmigration'
+  | 'possession'
+  | 'reincarnation'
+  | 'academy'
+  | 'extra-survival'
   | 'modern-fantasy'
   | 'murim'
   | 'romance-fantasy'
   | 'villainess'
-  | 'academy'
-  | 'possession'
-  | 'reincarnation'
+  | 'slow-burn-romance'
+  | 'contract-marriage'
+  | 'enemies-to-lovers'
+  | 'harem'
+  | 'pure-love'
+  | 'constellation-streamer'
+  | 'tower-climbing'
   | 'dungeon'
   | 'apocalypse-survival'
   | 'management'
+  | 'crafting-production'
+  | 'necromancy-undead'
   | 'idol-entertainment'
   | 'game-world'
-  | 'comedy'
+  | 'misunderstanding-comedy'
+  | 'dark-fantasy-revenge'
+  | 'healing-slice-of-life'
+  | 'overpowered-munchkin'
   | 'character-drama'
-  | 'slow-burn-romance';
+  | 'comedy'
+  | 'chaebol-business'
+  | 'sports-athletics'
+  | 'cooking-culinary'
+  | 'medical-doctor'
+  | 'childcare-family'
+  | 'regret-obsession'
+  | 'revenge-court'
+  | 'beast-taming'
+  | 'hidden-master'
+  | 'cliche-subversion'
+  | 'space-scifi'
+  | 'historical-alternate'
+  | 'law-prosecutor'
+  | 'military-war'
+  | 'streaming-creator'
+  | 'alchemy-potion'
+  | 'virtual-reality'
+  | 'demon-realm'
+  | 'hero-antihero'
+  | 'reverse-harem'
+  | 'second-generation'
+  | 'stealth-assassin'
+  | 'priest-paladin'
+  | 'genius-prodigy'
+  | 'isekai-truck'
+  | 'other';
 
 /**
  * User-provided premise and requirements at project creation (FR-1.1). Free text may be in any language; manuscript output is always English (OUTPUT-EN-001).
@@ -41,9 +81,15 @@ export interface StoryIntake {
   genre: {
     primary: GenreId;
     /**
-     * @maxItems 2
+     * @maxItems 5
      */
-    secondary?: [] | [GenreId] | [GenreId, GenreId];
+    secondary?:
+      | []
+      | [GenreId]
+      | [GenreId, GenreId]
+      | [GenreId, GenreId, GenreId]
+      | [GenreId, GenreId, GenreId, GenreId]
+      | [GenreId, GenreId, GenreId, GenreId, GenreId];
     notes?: string;
   };
   main_character?: CharacterSketch;

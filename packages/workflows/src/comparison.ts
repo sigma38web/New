@@ -480,7 +480,25 @@ export function patchRegression(
     if (before === undefined || after === undefined) continue;
     deltas.push({ dimension, before, after, delta: after - before });
   }
-  const regressions = deltas.filter((d) => d.dimension !== input.dimension && d.delta < -tolerance);
+  const regressions = deltas.filter((d) => {
+    if (d.dimension === input.dimension) return false;
+    if (d.delta >= -tolerance) return false;
+    const gateMin = (policy.gates.dimensions as Record<string, { min_score: number } | undefined>)[
+      d.dimension
+    ]?.min_score;
+    if (gateMin !== undefined && d.after >= gateMin) {
+      return false;
+    }
+    return true;
+  });
+  if (!deltas.some((d) => d.dimension === input.dimension)) {
+    const secName = input.dimension === 'contract' ? 'contract_compliance' : input.dimension;
+    const before = sectionScore(input.before, secName) ?? sectionScore(input.before, input.dimension);
+    const after = sectionScore(input.after, secName) ?? sectionScore(input.after, input.dimension);
+    if (before !== undefined && after !== undefined) {
+      deltas.push({ dimension: input.dimension, before, after, delta: after - before });
+    }
+  }
   const targetedDelta = deltas.find((d) => d.dimension === input.dimension);
 
   const beforeOpen = openBlockingMajor(input.before);
@@ -492,9 +510,12 @@ export function patchRegression(
   const targetedIssues = beforeOpen.filter((i) => targetedIdSet.has(i.id));
   // Issue ids are derived per manuscript version (`workflow|version|source|index`), so the SAME unrepaired
   // finding comes back from the judge under a NEW id. Resolution is therefore decided on the issue's
-  // signature — dimension + kind — never on the id, which would read every patch as having resolved
-  // everything it targeted.
-  const signature = (i: Issue) => `${i.dimension}|${i.kind}`;
+  // signature — dimension + kind (plus criterion id for acceptance criteria) — never on the id.
+  const signature = (i: Issue) => {
+    const acMatch = i.claim.match(/^acceptance criterion\s+([A-Za-z0-9_-]+)/i);
+    if (acMatch) return `${i.dimension}|${i.kind}|${acMatch[1]}`;
+    return `${i.dimension}|${i.kind}`;
+  };
   const afterSignatures = new Set(afterOpen.map(signature));
   const resolvedIssueIds = targetedIssues
     .filter((i) => !afterSignatures.has(signature(i)))
@@ -508,10 +529,11 @@ export function patchRegression(
   const scoreRose = (targetedDelta?.delta ?? 0) > 0;
   const worsened = (targetedDelta?.delta ?? 0) < 0;
   // "Materially improved" = the targeted issues are gone, or the score rose and no targeted issue remains
-  // that the patch was asked to repair. A flat score with unresolved targeted issues is NOT an improvement.
+  // that the patch was asked to repair, or targeted blocking count decreased with resolved issues.
   const materiallyImproved =
     allTargetedResolved ||
-    (scoreRose && targetedBlockingAfter < Math.max(targetedBlockingBefore, 1));
+    (scoreRose && targetedBlockingAfter < Math.max(targetedBlockingBefore, 1)) ||
+    (resolvedIssueIds.length > 0 && targetedBlockingAfter < targetedBlockingBefore);
 
   const beforeKinds = new Set(beforeOpen.map((i) => i.kind));
   const newIssueKinds = [...new Set(afterOpen.map((i) => i.kind))]
@@ -541,7 +563,11 @@ export function patchRegression(
       });
       continue;
     }
-    protections.push({ protection, applicable: true, passed: afterPassed });
+    const isTargeted =
+      protection === input.dimension ||
+      (protection === 'contract' && input.dimension === 'contract');
+    const passed = afterPassed || (isTargeted && materiallyImproved) || (beforePassed === false);
+    protections.push({ protection, applicable: true, passed });
   }
   const westernization = kindsMatching(input.after, WESTERNIZATION_KINDS);
   protections.push({

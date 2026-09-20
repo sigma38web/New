@@ -1080,10 +1080,44 @@ function extractJsonObject(text: string): unknown {
   const start = text.indexOf('{');
   const end = text.lastIndexOf('}');
   if (start < 0 || end <= start) return undefined;
+  const candidate = text.slice(start, end + 1);
   try {
-    return JSON.parse(text.slice(start, end + 1));
+    return JSON.parse(candidate);
   } catch {
-    return undefined;
+    // Attempt robust sanitization of control characters and trailing commas
+    try {
+      let s = candidate.replace(/,\s*([\]}])/g, '$1');
+      let inString = false;
+      let escaped = false;
+      let out = '';
+      for (let i = 0; i < s.length; i++) {
+        const c = s[i];
+        if (escaped) {
+          out += c;
+          escaped = false;
+          continue;
+        }
+        if (c === '\\') {
+          escaped = true;
+          out += c;
+          continue;
+        }
+        if (c === '"') {
+          inString = !inString;
+          out += c;
+          continue;
+        }
+        if (inString) {
+          if (c === '\n') { out += '\\n'; continue; }
+          if (c === '\r') { out += '\\r'; continue; }
+          if (c === '\t') { out += '\\t'; continue; }
+        }
+        out += c;
+      }
+      return JSON.parse(out);
+    } catch {
+      return undefined;
+    }
   }
 }
 
