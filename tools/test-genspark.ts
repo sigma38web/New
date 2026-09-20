@@ -1,4 +1,14 @@
+import { existsSync } from 'node:fs';
 import { resolveProvidersFromEnv } from '../packages/gateway/src/provider-mode.js';
+
+// Auto-load .env or .env.example if present in Node 20+
+if (typeof process.loadEnvFile === 'function') {
+  if (existsSync('.env')) {
+    process.loadEnvFile('.env');
+  } else if (existsSync('.env.example')) {
+    process.loadEnvFile('.env.example');
+  }
+}
 
 async function main() {
   console.log('Testing Genspark provider bridge connection...');
