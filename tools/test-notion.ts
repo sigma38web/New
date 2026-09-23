@@ -10,8 +10,32 @@ if (typeof process.loadEnvFile === 'function') {
   }
 }
 
+async function testModel(provider: any, modelId: string, expectedWord: string) {
+  console.log(`\n--- Testing Model ID: '${modelId}' ---`);
+  const t0 = Date.now();
+  const res = await provider.complete({
+    modelId,
+    system: 'You are a test validator.',
+    user: `Respond with exactly: "${expectedWord}"`,
+    params: {
+      temperature: 0.1,
+      max_tokens: 50,
+      top_p: 1,
+      seed: 42,
+      json_schema_mode: false,
+    },
+  });
+
+  const latency = Date.now() - t0;
+  console.log('Response:', res.text?.trim());
+  console.log('Returned Model ID:', res.modelId);
+  console.log('Latency:', `${latency}ms (reported: ${res.latencyMs}ms)`);
+  console.log('Workspace Id / Index in response:', (res as any).workspaceIndex ?? 'auto', (res as any).workspaceId ?? '');
+  console.log('Usage:', res.usage);
+}
+
 async function main() {
-  console.log('Testing Notion AI provider bridge connection...');
+  console.log('Testing Notion AI multi-workspace provider bridge connection...');
   const url = process.env.YEONJAE_NOTION_URL || 'https://archivedb.duckdns.org/notion/v1/complete';
   console.log('YEONJAE_NOTION_URL:', url);
 
@@ -25,30 +49,21 @@ async function main() {
     throw new Error("Provider 'notion' not found in resolved providers!");
   }
 
-  console.log('Sending test prompt to Notion AI...');
+  // 1. Test targeted Workspace 1
+  await testModel(provider, 'notion-ai-1', 'WORKSPACE_1_OK');
 
-  const res = await provider.complete({
-    modelId: 'notion-ai',
-    system: 'You are a test validator.',
-    user: 'Respond with exactly: "NOTION_AI_OK"',
-    params: {
-      temperature: 0.1,
-      max_tokens: 50,
-      top_p: 1,
-      seed: 42,
-      json_schema_mode: false,
-    },
-  });
+  // 2. Test targeted Workspace 2
+  await testModel(provider, 'notion-ai-2', 'WORKSPACE_2_OK');
 
-  console.log('--- Result ---');
-  console.log('Response:', res.text?.trim());
-  console.log('Model ID:', res.modelId);
-  console.log('Latency:', `${res.latencyMs}ms`);
-  console.log('Usage:', res.usage);
-  console.log('SUCCESS: Notion AI bridge call completed successfully!');
+  // 3. Test auto pool round-robin
+  await testModel(provider, 'notion-ai', 'AUTO_POOL_OK');
+
+  console.log('\n=========================================');
+  console.log('SUCCESS: All Notion AI multi-workspace tests completed successfully!');
+  console.log('=========================================');
 }
 
 main().catch((err) => {
-  console.error('FAILURE: Notion AI bridge call failed:', err);
+  console.error('\nFAILURE: Notion AI bridge call failed:', err);
   process.exit(1);
 });

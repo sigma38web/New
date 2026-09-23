@@ -4,8 +4,13 @@ Notion AI Provider Bridge Service for Yeonjae Studio.
 
 Exposes a local HTTP server speaking the /v1/complete protocol expected by
 @yeonjae/gateway HttpProvider, backed by notion_ai_auth.py.
-Since Notion AI has no model selector, any requested modelId is accepted and
-executed via Notion AI.
+
+Multi-Workspace Features:
+- Automatically detects all Notion workspaces in the authenticated account.
+- Pools workspaces with automatic round-robin load balancing.
+- Doubles capacity (each Business trial workspace gets 100 credits/6h = 200 total).
+- Seamless automatic failover: if workspace 1 is rate-limited, instantly retries on workspace 2.
+- Supports targeted workspace models (e.g. 'notion-ai-1', 'notion-ai-2') or auto ('notion-ai').
 """
 
 from __future__ import annotations
@@ -22,7 +27,7 @@ import threading
 import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 # Locate and import notion_ai_auth
 NOTION_AUTH_DIRS = [
@@ -86,6 +91,117 @@ def _extract_json(text: str) -> Optional[Any]:
     return None
 
 
+class WorkspaceInfo:
+    def __init__(self, index: int, space_id: str, user_id: str, name: str, plan: str, tier: str):
+        self.index = index
+        self.space_id = space_id
+        self.user_id = user_id
+        self.name = name
+        self.plan = plan
+        self.tier = tier
+        self.rate_limited = False
+        self.cooldown_until = 0.0
+        self.completed_requests = 0
+        self.failed_requests = 0
+
+    def is_available(self) -> bool:
+        if not self.rate_limited:
+            return True
+        if time.time() >= self.cooldown_until:
+            self.rate_limited = False
+            self.cooldown_until = 0.0
+            return True
+        return False
+
+    def mark_rate_limited(self, cooldown_seconds: float = 300.0) -> None:
+        self.rate_limited = True
+        self.cooldown_until = time.time() + cooldown_seconds
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "index": self.index,
+            "space_id": self.space_id,
+            "name": self.name,
+            "plan": self.plan,
+            "tier": self.tier,
+            "rate_limited": not self.is_available(),
+            "cooldown_remaining_sec": max(0, int(self.cooldown_until - time.time())) if self.rate_limited else 0,
+            "completed_requests": self.completed_requests,
+            "failed_requests": self.failed_requests,
+        }
+
+
+class WorkspacePool:
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.workspaces: List[WorkspaceInfo] = []
+        self._rr_index = 0
+        self.refresh()
+
+    def refresh(self) -> None:
+        with self.lock:
+            try:
+                raw_spaces = notion_ai_auth.get_workspaces()
+                existing_map = {ws.space_id: ws for ws in self.workspaces}
+                new_list = []
+                for idx, s in enumerate(raw_spaces, start=1):
+                    sid = s["space_id"]
+                    if sid in existing_map:
+                        ws = existing_map[sid]
+                        ws.index = idx
+                        ws.name = s.get("name") or f"Workspace {idx}"
+                        new_list.append(ws)
+                    else:
+                        new_list.append(WorkspaceInfo(
+                            index=idx,
+                            space_id=sid,
+                            user_id=s["user_id"],
+                            name=s.get("name") or f"Workspace {idx}",
+                            plan=s.get("plan", ""),
+                            tier=s.get("tier", "")
+                        ))
+                self.workspaces = new_list
+                logger.info("WorkspacePool initialized with %d workspaces", len(self.workspaces))
+            except Exception as e:
+                logger.error("Failed to refresh WorkspacePool: %s", e)
+
+    def select(self, preference: Optional[str] = None) -> Optional[WorkspaceInfo]:
+        with self.lock:
+            if not self.workspaces:
+                self.refresh()
+            if not self.workspaces:
+                return None
+
+            pref = (preference or "").lower().strip()
+            # If explicit workspace requested by index, name, or space_id
+            if pref:
+                for ws in self.workspaces:
+                    if (pref in (str(ws.index), f"notion-ai-{ws.index}", f"notion-ws-{ws.index}", f"ws-{ws.index}", f"workspace-{ws.index}")
+                        or pref == ws.space_id.lower()):
+                        return ws
+
+            # Otherwise round-robin over available (non-rate-limited)
+            available = [ws for ws in self.workspaces if ws.is_available()]
+            if not available:
+                # All rate-limited; pick the one that resets earliest
+                return min(self.workspaces, key=lambda w: w.cooldown_until)
+
+            ws = available[self._rr_index % len(available)]
+            self._rr_index = (self._rr_index + 1) % len(available)
+            return ws
+
+    def get_fallback(self, failed_ws: WorkspaceInfo) -> Optional[WorkspaceInfo]:
+        with self.lock:
+            candidates = [ws for ws in self.workspaces if ws.space_id != failed_ws.space_id and ws.is_available()]
+            if candidates:
+                return candidates[0]
+            others = [ws for ws in self.workspaces if ws.space_id != failed_ws.space_id]
+            return others[0] if others else None
+
+
+_workspace_pool = WorkspacePool()
+
+
 class NotionBridgeHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -116,25 +232,43 @@ class NotionBridgeHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         path = self.path.split("?")[0]
         if path == "/health":
-            limits = {}
+            workspaces_health = []
             try:
-                limits = notion_ai_auth.get_rate_limits()
+                limits_data = notion_ai_auth.get_rate_limits()
+                raw_ws_limits = {w["space_id"]: w for w in limits_data.get("workspaces", [])}
+                for ws in _workspace_pool.workspaces:
+                    wdict = ws.to_dict()
+                    wlimit = raw_ws_limits.get(ws.space_id, {})
+                    wdict["rate_limits"] = wlimit.get("rate_limits", {})
+                    wdict["usage"] = wlimit.get("usage", {})
+                    wdict["limits"] = wlimit.get("limits", {})
+                    workspaces_health.append(wdict)
             except Exception as e:
                 logger.warning("Could not fetch Notion AI rate limits: %s", e)
+                workspaces_health = [ws.to_dict() for ws in _workspace_pool.workspaces]
 
             self._send_json(200, {
                 "status": "ok",
                 "provider": "notion",
+                "strategy": "round_robin_with_failover",
+                "workspaces_count": len(_workspace_pool.workspaces),
                 "default_model": DEFAULT_MODEL,
-                "models": ["notion-ai"],
-                "rate_limits": limits,
+                "models": ["notion-ai", "notion-ai-1", "notion-ai-2", "notion-ws-1", "notion-ws-2"],
+                "workspaces": workspaces_health,
             })
             return
 
         if path == "/v1/models":
-            self._send_json(200, {
-                "models": [{"id": "notion-ai", "name": "Notion AI (Universal)", "provider": "notion"}]
-            })
+            models = [
+                {"id": "notion-ai", "name": "Notion AI (Universal / Auto Pool)", "provider": "notion"},
+            ]
+            for ws in _workspace_pool.workspaces:
+                models.append({
+                    "id": f"notion-ai-{ws.index}",
+                    "name": f"Notion AI (Workspace {ws.index}: {ws.name})",
+                    "provider": "notion"
+                })
+            self._send_json(200, {"models": models})
             return
 
         self._send_json(404, {"error": "not_found", "path": path})
@@ -189,15 +323,59 @@ class NotionBridgeHandler(BaseHTTPRequestHandler):
         started = time.time()
         timeout = int(os.getenv("NOTION_TIMEOUT", "600"))
 
-        try:
-            full_reply, metadata = notion_ai_auth.chat_completion(
-                prompt=user,
-                system_prompt=system if system else None,
-                timeout=timeout,
-            )
-        except Exception as exc:
-            err_msg = str(exc)
-            logger.error("Notion AI completion error: %s", err_msg)
+        ws = _workspace_pool.select(model_id)
+        if not ws:
+            with _in_flight_mutex:
+                _in_flight_locks.pop(idempotency_key, None)
+            self._send_json(503, {"error": "no_workspaces", "message": "No Notion workspaces available in account pool"})
+            return
+
+        def _do_call(target_ws: WorkspaceInfo) -> Tuple[Optional[str], Optional[Dict[str, Any]], Optional[Exception]]:
+            try:
+                reply, meta = notion_ai_auth.chat_completion(
+                    prompt=user,
+                    system_prompt=system if system else None,
+                    space_id=target_ws.space_id,
+                    user_id=target_ws.user_id,
+                    timeout=timeout,
+                )
+                return reply, meta, None
+            except Exception as e:
+                return None, None, e
+
+        full_reply, metadata, err = _do_call(ws)
+        active_ws = ws
+
+        # Failover logic: if rate limited or error occurs, try fallback workspace
+        if err is not None:
+            err_str = str(err)
+            is_rate_limit = "429" in err_str or "rate limit" in err_str.lower() or "credit" in err_str.lower()
+            if is_rate_limit:
+                ws.mark_rate_limited(cooldown_seconds=300)
+                logger.warning("Workspace %d (%s) rate-limited: %s", ws.index, ws.space_id, err_str)
+            else:
+                ws.failed_requests += 1
+
+            fallback_ws = _workspace_pool.get_fallback(ws)
+            if fallback_ws:
+                logger.info(
+                    "Failing over request from Workspace %d to Workspace %d (%s)...",
+                    ws.index, fallback_ws.index, fallback_ws.space_id
+                )
+                fb_reply, fb_meta, fb_err = _do_call(fallback_ws)
+                if fb_err is None:
+                    full_reply = fb_reply
+                    metadata = fb_meta
+                    err = None
+                    active_ws = fallback_ws
+
+        with _in_flight_mutex:
+            _in_flight_locks.pop(idempotency_key, None)
+
+        if err is not None:
+            err_msg = str(err)
+            active_ws.failed_requests += 1
+            logger.error("Notion AI completion failed: %s", err_msg)
             status_code = 502
             if "unauthorized" in err_msg.lower() or "401" in err_msg:
                 status_code = 401
@@ -208,15 +386,13 @@ class NotionBridgeHandler(BaseHTTPRequestHandler):
                 "message": err_msg[:300],
             })
             return
-        finally:
-            with _in_flight_mutex:
-                _in_flight_locks.pop(idempotency_key, None)
 
         if cancel_event.is_set():
             logger.info("Request %s completed after cancellation; returning cancelled status", idempotency_key)
             self._send_json(499, {"error": "client_closed_request", "message": "Request cancelled"})
             return
 
+        active_ws.completed_requests += 1
         text = full_reply or ""
         input_tokens = max(1, len(system + user) // 4)
         output_tokens = max(1, len(text) // 4)
@@ -224,14 +400,16 @@ class NotionBridgeHandler(BaseHTTPRequestHandler):
 
         elapsed = time.time() - started
         logger.info(
-            "Complete success in %.2fs: output_chars=%d, in_tokens=%d, out_tokens=%d",
-            elapsed, len(text), input_tokens, output_tokens
+            "Complete success via Workspace %d (%s) in %.2fs: output_chars=%d, in_tokens=%d, out_tokens=%d",
+            active_ws.index, active_ws.space_id[:8], elapsed, len(text), input_tokens, output_tokens
         )
 
         resp_body = {
             "modelId": model_id,
             "provider": "notion",
             "providerRequestId": f"notion-{idempotency_key}",
+            "workspaceIndex": active_ws.index,
+            "workspaceId": active_ws.space_id,
             "text": text,
             "finishReason": "stop",
             "usage": {
@@ -248,7 +426,7 @@ class NotionBridgeHandler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Notion AI Provider Bridge Service")
+    parser = argparse.ArgumentParser(description="Notion AI Multi-Workspace Provider Bridge Service")
     parser.add_argument("--port", type=int, default=int(os.getenv("NOTION_PORT", "8092")), help="Port to listen on")
     parser.add_argument("--host", type=str, default=os.getenv("NOTION_HOST", "127.0.0.1"), help="Host to bind to")
     args = parser.parse_args()
@@ -257,6 +435,7 @@ def main() -> None:
     logger.info("Notion AI Provider Bridge listening on http://%s:%d", args.host, args.port)
     logger.info("Health check: http://%s:%d/health", args.host, args.port)
     logger.info("Complete endpoint: http://%s:%d/v1/complete", args.host, args.port)
+    logger.info("Detected workspaces: %d", len(_workspace_pool.workspaces))
 
     def _handle_sigterm(signum: int, frame: Any) -> None:
         logger.info("Shutting down Notion AI Provider Bridge...")

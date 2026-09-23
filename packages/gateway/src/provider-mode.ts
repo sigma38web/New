@@ -89,10 +89,10 @@ export function gensparkRouting(env: NodeJS.ProcessEnv = process.env): RoutingTa
 }
 
 export function notionRouting(env: NodeJS.ProcessEnv = process.env): RoutingTable {
-  const model = env.YEONJAE_MODEL_NOTION ?? 'notion-ai';
-  const route = [
+  const defaultModel = env.YEONJAE_MODEL_NOTION ?? 'notion-ai';
+  const route = (modelId: string) => [
     {
-      modelId: model,
+      modelId,
       provider: 'notion',
       priority: 1,
       family: 'notion',
@@ -103,10 +103,10 @@ export function notionRouting(env: NodeJS.ProcessEnv = process.env): RoutingTabl
     },
   ];
   return {
-    R: route,
-    P: route,
-    M: route,
-    C: route,
+    R: route(env.YEONJAE_MODEL_R ?? defaultModel),
+    P: route(env.YEONJAE_MODEL_P ?? defaultModel),
+    M: route(env.YEONJAE_MODEL_M ?? defaultModel),
+    C: route(env.YEONJAE_MODEL_C ?? defaultModel),
     E: [],
   };
 }
