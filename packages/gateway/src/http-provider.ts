@@ -173,7 +173,13 @@ export class HttpProvider implements Provider {
     if (typeof timer.unref === 'function') timer.unref();
 
     try {
-      const url = new URL('/v1/complete', this.endpoint);
+      let url: URL;
+      if (this.endpoint.pathname.endsWith('/v1/complete')) {
+        url = this.endpoint;
+      } else {
+        const p = this.endpoint.pathname.replace(/\/+$/, '');
+        url = new URL(p ? `${p}/v1/complete` : '/v1/complete', this.endpoint.origin);
+      }
       const response = (await undiciFetch(url, {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...(this.opts.headers ?? {}) },

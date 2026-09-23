@@ -15,19 +15,21 @@ import { readFileSync } from 'node:fs';
 import { type RouteEntry, type RoutingTable } from './gateway.js';
 import { DEFAULT_GENSPARK_BRIDGE_URL, GensparkProvider } from './genspark-provider.js';
 import { liveGatewayFromEnv } from './live-config.js';
+import { DEFAULT_NOTION_BRIDGE_URL, NotionProvider } from './notion-provider.js';
 import { ReplayProvider, type Recording } from './replay-provider.js';
 import { type Provider } from './types.js';
 
-export type ProviderMode = 'replay' | 'genspark' | 'live' | 'simulated';
+export type ProviderMode = 'replay' | 'genspark' | 'notion' | 'live' | 'simulated';
 
 export function providerModeFromEnv(env: NodeJS.ProcessEnv = process.env): ProviderMode {
   const mode = env.YEONJAE_PROVIDER_MODE;
   if (mode === 'replay') return 'replay';
   if (mode === 'genspark') return 'genspark';
+  if (mode === 'notion') return 'notion';
   if (mode === 'live') return 'live';
   if (mode === 'simulated') return 'simulated';
   throw new Error(
-    "YEONJAE_PROVIDER_MODE must be set to 'replay', 'genspark', 'live' or 'simulated'; the process refuses to start without an explicit " +
+    "YEONJAE_PROVIDER_MODE must be set to 'replay', 'genspark', 'notion', 'live' or 'simulated'; the process refuses to start without an explicit " +
       'provider mode so a misconfigured deployment cannot issue paid calls',
   );
 }
@@ -82,6 +84,29 @@ export function gensparkRouting(env: NodeJS.ProcessEnv = process.env): RoutingTa
     P: route(env.YEONJAE_MODEL_P ?? rest, 'google'),
     M: route(env.YEONJAE_MODEL_M ?? rest, 'google'),
     C: route(env.YEONJAE_MODEL_C ?? rest, 'google'),
+    E: [],
+  };
+}
+
+export function notionRouting(env: NodeJS.ProcessEnv = process.env): RoutingTable {
+  const model = env.YEONJAE_MODEL_NOTION ?? 'notion-ai';
+  const route = [
+    {
+      modelId: model,
+      provider: 'notion',
+      priority: 1,
+      family: 'notion',
+      priceInPerMTokCents: 0,
+      priceOutPerMTokCents: 0,
+      maxContextTokens: 128_000,
+      supportsJsonSchema: true,
+    },
+  ];
+  return {
+    R: route,
+    P: route,
+    M: route,
+    C: route,
     E: [],
   };
 }
@@ -144,6 +169,29 @@ export function resolveProvidersFromEnv(
           ],
         ]),
       routing: gensparkRouting(env),
+    };
+  }
+  if (mode === 'notion') {
+    const rawUrl = env.YEONJAE_NOTION_URL ?? DEFAULT_NOTION_BRIDGE_URL;
+    const bridgeUrl = rawUrl.trim().replace(/\s+/g, '');
+    const token = (env.YEONJAE_NOTION_TOKEN ?? env.YEONJAE_GENSPARK_TOKEN)?.trim();
+    return {
+      mode,
+      providers: () =>
+        new Map<string, Provider>([
+          [
+            'notion',
+            new NotionProvider({
+              baseUrl: bridgeUrl,
+              headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+              allowNonLoopback: true,
+              timeoutMs: env.YEONJAE_NOTION_TIMEOUT_MS
+                ? parseInt(env.YEONJAE_NOTION_TIMEOUT_MS, 10)
+                : 600_000,
+            }),
+          ],
+        ]),
+      routing: notionRouting(env),
     };
   }
   const replayFile = env.YEONJAE_REPLAY_FILE;
